@@ -24,6 +24,11 @@ const KEY_STORAGE = "rfp.anthropicKey";
 export default function Home() {
   const [apiKey, setApiKey] = useState("");
   const [playbooks, setPlaybooks] = useState<PlaybookMeta[]>([]);
+  const [llm, setLlm] = useState<{
+    needsUserKey: boolean;
+    localSubscription: boolean;
+    apiKeyFromEnv: boolean;
+  } | null>(null);
 
   const [clientName, setClientName] = useState("");
   const [clientTicker, setClientTicker] = useState("");
@@ -54,6 +59,10 @@ export default function Home() {
     fetch("/api/playbooks")
       .then((r) => r.json())
       .then((d) => setPlaybooks(d.playbooks ?? []))
+      .catch(() => {});
+    fetch("/api/health")
+      .then((r) => r.json())
+      .then((d) => setLlm(d.llm ?? null))
       .catch(() => {});
   }, []);
 
@@ -283,8 +292,19 @@ export default function Home() {
             </button>
           )}
 
-          <details className="disclosure" open={!apiKey}>
-            <summary>Anthropic API key {apiKey ? "✓ set" : "— required"}</summary>
+          {llm && !llm.needsUserKey && !apiKey && (
+            <p className="hint" style={{ marginTop: 14 }}>
+              {llm.localSubscription
+                ? "Using your local Claude CLI subscription — no API key needed. Paste one below to use the API instead."
+                : "Using the server's configured API key. Paste your own below to override it."}
+            </p>
+          )}
+
+          <details className="disclosure" open={Boolean(llm?.needsUserKey) && !apiKey}>
+            <summary>
+              Anthropic API key{" "}
+              {apiKey ? "✓ set" : llm && !llm.needsUserKey ? "— optional" : "— required"}
+            </summary>
             <label htmlFor="apiKey">Key (sk-ant-…)</label>
             <input
               id="apiKey"

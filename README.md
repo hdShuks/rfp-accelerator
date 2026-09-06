@@ -30,8 +30,26 @@ cp .env.example .env.local   # then edit: set EDGAR_USER_AGENT to "Name your-ema
 npm run dev                  # http://localhost:3000
 ```
 
-Paste an Anthropic API key in the UI (held in the browser tab's `sessionStorage`
-only), or set `ANTHROPIC_API_KEY` in `.env.local` for local dev.
+### Reaching Claude — three options
+
+The app tries these in order:
+
+1. **API key pasted in the UI** — held in the browser tab's `sessionStorage`, sent
+   per-request, never stored server-side.
+2. **`ANTHROPIC_API_KEY`** in `.env.local`.
+3. **Local subscription mode** — if the [`claude` CLI](https://docs.claude.com/en/docs/claude-code)
+   is installed and logged into your Claude Pro/Max plan, the app shells out to it
+   and spend counts against your plan / usage credits instead of an API balance.
+   Local dev only — never available on Vercel. Set `RFP_LLM_MODE=api` to disable.
+
+For a Claude Pro subscriber with no API credits, option 3 is the way to build and
+test for free:
+
+```bash
+npm i -g @anthropic-ai/claude-code   # if you don't have it
+claude            # then run /login and pick "Claude account with subscription"
+npm run dev       # the app now uses your subscription — no key needed
+```
 
 ## Scripts
 

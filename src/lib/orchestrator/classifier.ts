@@ -11,7 +11,7 @@ import type { Classification, RunInput } from "./types";
  */
 export async function classify(
   input: RunInput,
-  apiKey: string,
+  apiKey?: string | null,
   budget?: RunBudget,
 ): Promise<Classification> {
   if (input.proposalType?.trim()) {

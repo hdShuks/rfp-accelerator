@@ -1,4 +1,4 @@
-import { resolveApiKey, MissingApiKeyError } from "@/lib/llm/anthropic";
+import { assertLlmReachable, MissingApiKeyError } from "@/lib/llm/anthropic";
 import { runOrchestration } from "@/lib/orchestrator/runner";
 import type { RunInput } from "@/lib/orchestrator/types";
 
@@ -19,9 +19,9 @@ export async function POST(req: Request) {
     return json({ error: "clientName is required" }, 400);
   }
 
-  let apiKey: string;
+  const userKey = req.headers.get("x-anthropic-key");
   try {
-    apiKey = resolveApiKey(req.headers.get("x-anthropic-key"));
+    assertLlmReachable(userKey);
   } catch (err) {
     const status = err instanceof MissingApiKeyError ? 401 : 500;
     return json({ error: err instanceof Error ? err.message : "Auth failed" }, status);
@@ -41,7 +41,7 @@ export async function POST(req: Request) {
       const send = (obj: unknown) =>
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
       try {
-        for await (const event of runOrchestration(input, apiKey)) {
+        for await (const event of runOrchestration(input, userKey)) {
           send(event);
         }
       } catch (err) {

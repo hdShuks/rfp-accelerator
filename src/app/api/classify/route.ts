@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { resolveApiKey, MissingApiKeyError } from "@/lib/llm/anthropic";
+import { assertLlmReachable, MissingApiKeyError } from "@/lib/llm/anthropic";
 import { classify } from "@/lib/orchestrator/classifier";
 
 export const runtime = "nodejs";
@@ -13,15 +13,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
+  const userKey = req.headers.get("x-anthropic-key");
   try {
-    const apiKey = resolveApiKey(req.headers.get("x-anthropic-key"));
+    assertLlmReachable(userKey);
     const classification = await classify(
       {
         clientName: body.clientName ?? "",
         description: body.description ?? "",
         proposalType: body.proposalType,
       },
-      apiKey,
+      userKey,
     );
     return NextResponse.json(classification);
   } catch (err) {

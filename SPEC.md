@@ -139,16 +139,23 @@ in-process LRU (cold starts re-fetch, which is fine).
   the model.
 - Running USD estimate streamed to the UI per step.
 
-### BYO API key
+### Reaching Claude (`src/lib/llm/`)
 
-- User pastes their Anthropic key into a settings field.
-- Held in `sessionStorage` (gone on tab close), sent to our backend per request
-  in the `x-anthropic-key` header over HTTPS.
-- Backend uses it, never logs it, never persists it.
-- If no user key, backend falls back to `ANTHROPIC_API_KEY` env (local dev only;
-  unset in the public deploy so the toolkit is truly BYO).
-- All model calls go through our backend (never browser → Anthropic) so budget
-  caps are enforced server-side.
+Resolved per request, in priority order:
+
+1. **User key** — pasted into a settings field, held in `sessionStorage` (gone on
+   tab close), sent to the backend in the `x-anthropic-key` header over HTTPS.
+   Used, never logged, never persisted.
+2. **`ANTHROPIC_API_KEY`** env — local dev fallback; unset in the public deploy so
+   the toolkit is truly BYO.
+3. **Local subscription mode** (`subscription.ts`) — shells out to the `claude`
+   CLI, which authenticates with the user's Claude Pro/Max plan. Spend counts
+   against the plan, not an API balance. Gated off when `process.env.VERCEL` is
+   set or `RFP_LLM_MODE=api`; unavailable when no `claude` binary is found.
+
+All model calls go through the backend (never browser → Anthropic) so budget caps
+are enforced server-side. In subscription mode the CLI reports $0 spend, so the
+budget falls back to an API-rate estimate from the token counts.
 
 ---
 

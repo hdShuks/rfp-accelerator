@@ -33,7 +33,7 @@ function pickTicker(step: Step, input: RunInput): { field: string; value: string
  */
 export async function* runOrchestration(
   input: RunInput,
-  apiKey: string,
+  apiKey?: string | null,
 ): AsyncGenerator<RunEvent, void, void> {
   const runId = randomUUID();
   const budget = new RunBudget(ceilingUsd());
@@ -112,7 +112,7 @@ async function* runStep(
   input: RunInput,
   playbook: Playbook,
   deps: Artifact[],
-  apiKey: string,
+  apiKey: string | null | undefined,
   budget: RunBudget,
 ): AsyncGenerator<RunEvent, Artifact, void> {
   const tier: ModelTier = step.model_tier ?? DEFAULT_TIER[step.tool];
