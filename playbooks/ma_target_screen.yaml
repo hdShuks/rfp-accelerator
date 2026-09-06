@@ -1,0 +1,44 @@
+id: ma_target_screen
+name: M&A / Acquisition Screen
+description: >
+  Screen a public acquisition target for a corporate or PE client — market
+  context, target financials and operations from SEC filings, and a first cut at
+  synergy hypotheses.
+aliases: [m&a, ma, mna, merger, acquisition, "potential acquisition", buyside]
+inputs:
+  required: [clientName, targetTicker]
+  optional: [clientTicker, description]
+
+steps:
+  - id: market_context
+    title: Market & competitive context
+    tool: llm_research
+    model_tier: reasoning
+    prompt: market_context
+
+  - id: target_financials
+    title: Target financial profile (EDGAR)
+    tool: edgar_financials
+    inputs: { ticker: targetTicker }
+
+  - id: target_operations
+    title: Target business & risk overview (10-K)
+    tool: edgar_narrative
+    inputs: { ticker: targetTicker }
+
+  - id: synergy_hypotheses
+    title: Synergy hypotheses
+    tool: llm_synthesis
+    model_tier: reasoning
+    depends_on: [market_context, target_financials, target_operations]
+    instruction: >
+      Propose 4-6 concrete synergy hypotheses (cost and revenue), each with a
+      rough directional size, the evidence it rests on, and how the deal team
+      would test it in diligence. Separate what the data supports from what is
+      speculative.
+
+  - id: proposal_skeleton
+    title: Draft proposal skeleton
+    tool: llm_synthesis
+    model_tier: reasoning
+    depends_on: [market_context, target_financials, target_operations, synergy_hypotheses]

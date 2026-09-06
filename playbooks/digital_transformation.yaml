@@ -1,0 +1,45 @@
+id: digital_transformation
+name: Digital Transformation
+description: >
+  Shape a digital / technology transformation proposal — where the client is
+  today, the value at stake, and a phased approach.
+aliases: [digital, "digital transformation", technology transformation, dx, modernization]
+inputs:
+  required: [clientName]
+  optional: [clientTicker, description]
+
+steps:
+  - id: industry_digital_trends
+    title: Industry digital trends & benchmarks
+    tool: llm_research
+    model_tier: reasoning
+    prompt: market_context
+    instruction: >
+      Focus on the digital maturity of this industry: what leaders have done,
+      common failure modes, and the capabilities that separate the two.
+
+  - id: client_financials
+    title: Client financial profile (EDGAR)
+    tool: edgar_financials
+    inputs: { ticker: clientTicker }
+
+  - id: client_strategy_signals
+    title: Client strategy & risk signals (10-K)
+    tool: edgar_narrative
+    inputs: { ticker: clientTicker }
+
+  - id: value_at_stake
+    title: Value-at-stake hypotheses
+    tool: llm_synthesis
+    model_tier: reasoning
+    depends_on: [industry_digital_trends, client_financials, client_strategy_signals]
+    instruction: >
+      Identify 3-5 areas where digital investment could move the client's
+      economics (cost-to-serve, working capital, growth, risk). Tie each to a
+      number or trend from the financial profile where possible.
+
+  - id: proposal_skeleton
+    title: Draft proposal skeleton
+    tool: llm_synthesis
+    model_tier: reasoning
+    depends_on: [industry_digital_trends, client_financials, client_strategy_signals, value_at_stake]

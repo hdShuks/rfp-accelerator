@@ -1,0 +1,46 @@
+id: org_design
+name: Organization Design / Operating Model
+description: >
+  Frame an organization design or operating-model proposal — structural pressure
+  points, cost and span-of-control context, and a redesign approach.
+aliases: [org, "org design", "organizational change", operating model, restructuring, "org redesign"]
+inputs:
+  required: [clientName]
+  optional: [clientTicker, description]
+
+steps:
+  - id: org_context
+    title: Operating-model context & analogues
+    tool: llm_research
+    model_tier: reasoning
+    prompt: market_context
+    instruction: >
+      Focus on operating-model choices in this industry: centralization vs.
+      business-unit autonomy, shared services, span of control, and what tends
+      to trigger a redesign.
+
+  - id: client_financials
+    title: Client financial profile (EDGAR)
+    tool: edgar_financials
+    inputs: { ticker: clientTicker }
+
+  - id: client_structure_signals
+    title: Segments, headcount & risk signals (10-K)
+    tool: edgar_narrative
+    inputs: { ticker: clientTicker }
+
+  - id: design_hypotheses
+    title: Design hypotheses
+    tool: llm_synthesis
+    model_tier: reasoning
+    depends_on: [org_context, client_financials, client_structure_signals]
+    instruction: >
+      Propose 3-5 hypotheses about where the current structure is likely
+      creating cost, slowing decisions, or duplicating work, and what a redesign
+      would change. Note which are testable from public data vs. need interviews.
+
+  - id: proposal_skeleton
+    title: Draft proposal skeleton
+    tool: llm_synthesis
+    model_tier: reasoning
+    depends_on: [org_context, client_financials, client_structure_signals, design_hypotheses]

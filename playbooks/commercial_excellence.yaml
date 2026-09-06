@@ -1,0 +1,46 @@
+id: commercial_excellence
+name: Commercial Excellence / Growth
+description: >
+  Shape a commercial excellence proposal — pricing, sales effectiveness, and
+  growth levers, grounded in the client's margin and growth trajectory.
+aliases: [commercial, "commercial excellence", "commercial engine", pricing, growth, "sales effectiveness", "revenue growth"]
+inputs:
+  required: [clientName]
+  optional: [clientTicker, description]
+
+steps:
+  - id: market_growth_context
+    title: Market growth & commercial benchmarks
+    tool: llm_research
+    model_tier: reasoning
+    prompt: market_context
+    instruction: >
+      Focus on demand growth, pricing power, channel economics, and commercial
+      benchmarks (win rates, discount leakage, sales productivity) for this
+      industry.
+
+  - id: client_financials
+    title: Client financial profile (EDGAR)
+    tool: edgar_financials
+    inputs: { ticker: clientTicker }
+
+  - id: client_commercial_signals
+    title: Revenue mix & commentary (10-K)
+    tool: edgar_narrative
+    inputs: { ticker: clientTicker }
+
+  - id: growth_hypotheses
+    title: Commercial value hypotheses
+    tool: llm_synthesis
+    model_tier: reasoning
+    depends_on: [market_growth_context, client_financials, client_commercial_signals]
+    instruction: >
+      Propose 4-6 commercial levers (pricing, mix, churn, sales coverage,
+      channel) with a directional margin or growth impact and the diligence
+      needed to size each. Anchor to the client's actual margin trend.
+
+  - id: proposal_skeleton
+    title: Draft proposal skeleton
+    tool: llm_synthesis
+    model_tier: reasoning
+    depends_on: [market_growth_context, client_financials, client_commercial_signals, growth_hypotheses]
