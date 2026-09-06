@@ -81,31 +81,46 @@ const DURATION_METRICS = new Set([
 ]);
 
 interface AnnualPoint {
-  fy: number;
+  fy: number; // fiscal year = calendar year the period ends in
   end: string;
   val: number;
   filed: string;
 }
 
-/** Pick one annual (FY, 10-K) value per fiscal year from a concept's series. */
+/**
+ * Reduce a concept's series to one value per fiscal year.
+ *
+ * companyfacts includes prior-year comparatives inside each filing, all tagged
+ * with the *filing's* `fy` — so `fy` cannot identify the data point's own year.
+ * Instead we dedupe by the reporting period `(start..end)`, keep the
+ * latest-filed value for each (captures restatements), then bucket by the
+ * calendar year the period ends in.
+ */
 function pickAnnual(points: XbrlDataPoint[] | undefined, duration: boolean): Map<number, AnnualPoint> {
-  const out = new Map<number, AnnualPoint>();
-  if (!points) return out;
-  for (const p of points) {
-    if (p.fp !== "FY") continue;
-    if (!p.form || !/^10-K/.test(p.form)) continue;
+  const byPeriod = new Map<string, XbrlDataPoint>();
+  for (const p of points ?? []) {
     if (typeof p.val !== "number" || Number.isNaN(p.val)) continue;
-    if (p.fy == null) continue;
+    if (p.fp !== "FY") continue; // annual context only
+    if (!p.form || !/^10-K/.test(p.form)) continue;
     if (duration) {
-      // duration facts carry start+end ~1 year apart; skip YTD partials
       if (!p.start) continue;
       const span = (Date.parse(p.end) - Date.parse(p.start)) / 86_400_000;
-      if (span < 300 || span > 400) continue;
+      if (span < 300 || span > 400) continue; // drop quarterly / YTD partials
+    } else if (p.start) {
+      continue; // instant facts have no start
     }
-    const existing = out.get(p.fy);
-    // latest-filed wins (captures restatements)
-    if (!existing || (p.filed ?? "") > existing.filed) {
-      out.set(p.fy, { fy: p.fy, end: p.end, val: p.val, filed: p.filed ?? "" });
+    const key = `${p.start ?? ""}..${p.end}`;
+    const seen = byPeriod.get(key);
+    if (!seen || (p.filed ?? "") > (seen.filed ?? "")) byPeriod.set(key, p);
+  }
+
+  const out = new Map<number, AnnualPoint>();
+  for (const p of byPeriod.values()) {
+    const fy = new Date(p.end).getUTCFullYear();
+    const existing = out.get(fy);
+    // if two periods land in the same calendar year, keep the one ending later
+    if (!existing || p.end > existing.end) {
+      out.set(fy, { fy, end: p.end, val: p.val, filed: p.filed ?? "" });
     }
   }
   return out;
