@@ -1,0 +1,130 @@
+{
+  "cik": 1234567,
+  "entityName": "Acme Robotics Inc.",
+  "facts": {
+    "us-gaap": {
+      "RevenueFromContractWithCustomerExcludingAssessedTax": {
+        "label": "Revenue",
+        "units": {
+          "USD": [
+            { "start": "2021-01-01", "end": "2021-12-31", "val": 1000, "fy": 2021, "fp": "FY", "form": "10-K", "filed": "2022-02-01" },
+            { "start": "2022-01-01", "end": "2022-12-31", "val": 1200, "fy": 2022, "fp": "FY", "form": "10-K", "filed": "2023-02-01" },
+            { "start": "2023-01-01", "end": "2023-03-31", "val": 360, "fy": 2023, "fp": "Q1", "form": "10-Q", "filed": "2023-05-01" },
+            { "start": "2023-01-01", "end": "2023-12-31", "val": 1500, "fy": 2023, "fp": "FY", "form": "10-K", "filed": "2024-02-01" }
+          ]
+        }
+      },
+      "CostOfRevenue": {
+        "label": "Cost of revenue",
+        "units": {
+          "USD": [
+            { "start": "2021-01-01", "end": "2021-12-31", "val": 600, "fy": 2021, "fp": "FY", "form": "10-K", "filed": "2022-02-01" },
+            { "start": "2022-01-01", "end": "2022-12-31", "val": 700, "fy": 2022, "fp": "FY", "form": "10-K", "filed": "2023-02-01" },
+            { "start": "2023-01-01", "end": "2023-12-31", "val": 850, "fy": 2023, "fp": "FY", "form": "10-K", "filed": "2024-02-01" }
+          ]
+        }
+      },
+      "OperatingIncomeLoss": {
+        "label": "Operating income",
+        "units": {
+          "USD": [
+            { "start": "2021-01-01", "end": "2021-12-31", "val": 200, "fy": 2021, "fp": "FY", "form": "10-K", "filed": "2022-02-01" },
+            { "start": "2022-01-01", "end": "2022-12-31", "val": 260, "fy": 2022, "fp": "FY", "form": "10-K", "filed": "2023-02-01" },
+            { "start": "2023-01-01", "end": "2023-12-31", "val": 350, "fy": 2023, "fp": "FY", "form": "10-K", "filed": "2024-02-01" }
+          ]
+        }
+      },
+      "DepreciationDepletionAndAmortization": {
+        "label": "D&A",
+        "units": {
+          "USD": [
+            { "start": "2021-01-01", "end": "2021-12-31", "val": 50, "fy": 2021, "fp": "FY", "form": "10-K", "filed": "2022-02-01" },
+            { "start": "2022-01-01", "end": "2022-12-31", "val": 55, "fy": 2022, "fp": "FY", "form": "10-K", "filed": "2023-02-01" },
+            { "start": "2023-01-01", "end": "2023-12-31", "val": 60, "fy": 2023, "fp": "FY", "form": "10-K", "filed": "2024-02-01" }
+          ]
+        }
+      },
+      "NetIncomeLoss": {
+        "label": "Net income",
+        "units": {
+          "USD": [
+            { "start": "2021-01-01", "end": "2021-12-31", "val": 150, "fy": 2021, "fp": "FY", "form": "10-K", "filed": "2022-02-01" },
+            { "start": "2022-01-01", "end": "2022-12-31", "val": 190, "fy": 2022, "fp": "FY", "form": "10-K", "filed": "2023-02-01" },
+            { "start": "2023-01-01", "end": "2023-12-31", "val": 260, "fy": 2023, "fp": "FY", "form": "10-K", "filed": "2024-02-01" }
+          ]
+        }
+      },
+      "NetCashProvidedByUsedInOperatingActivities": {
+        "label": "Operating cash flow",
+        "units": {
+          "USD": [
+            { "start": "2021-01-01", "end": "2021-12-31", "val": 220, "fy": 2021, "fp": "FY", "form": "10-K", "filed": "2022-02-01" },
+            { "start": "2022-01-01", "end": "2022-12-31", "val": 280, "fy": 2022, "fp": "FY", "form": "10-K", "filed": "2023-02-01" },
+            { "start": "2023-01-01", "end": "2023-12-31", "val": 370, "fy": 2023, "fp": "FY", "form": "10-K", "filed": "2024-02-01" }
+          ]
+        }
+      },
+      "PaymentsToAcquirePropertyPlantAndEquipment": {
+        "label": "Capex",
+        "units": {
+          "USD": [
+            { "start": "2021-01-01", "end": "2021-12-31", "val": 40, "fy": 2021, "fp": "FY", "form": "10-K", "filed": "2022-02-01" },
+            { "start": "2022-01-01", "end": "2022-12-31", "val": 45, "fy": 2022, "fp": "FY", "form": "10-K", "filed": "2023-02-01" },
+            { "start": "2023-01-01", "end": "2023-12-31", "val": 50, "fy": 2023, "fp": "FY", "form": "10-K", "filed": "2024-02-01" }
+          ]
+        }
+      },
+      "CashAndCashEquivalentsAtCarryingValue": {
+        "label": "Cash",
+        "units": {
+          "USD": [
+            { "end": "2021-12-31", "val": 300, "fy": 2021, "fp": "FY", "form": "10-K", "filed": "2022-02-01" },
+            { "end": "2022-12-31", "val": 350, "fy": 2022, "fp": "FY", "form": "10-K", "filed": "2023-02-01" },
+            { "end": "2023-12-31", "val": 500, "fy": 2023, "fp": "FY", "form": "10-K", "filed": "2024-02-01" }
+          ]
+        }
+      },
+      "LongTermDebtNoncurrent": {
+        "label": "Long-term debt",
+        "units": {
+          "USD": [
+            { "end": "2021-12-31", "val": 400, "fy": 2021, "fp": "FY", "form": "10-K", "filed": "2022-02-01" },
+            { "end": "2022-12-31", "val": 380, "fy": 2022, "fp": "FY", "form": "10-K", "filed": "2023-02-01" },
+            { "end": "2023-12-31", "val": 350, "fy": 2023, "fp": "FY", "form": "10-K", "filed": "2024-02-01" }
+          ]
+        }
+      },
+      "LongTermDebtCurrent": {
+        "label": "Current portion of long-term debt",
+        "units": {
+          "USD": [
+            { "end": "2021-12-31", "val": 20, "fy": 2021, "fp": "FY", "form": "10-K", "filed": "2022-02-01" },
+            { "end": "2022-12-31", "val": 20, "fy": 2022, "fp": "FY", "form": "10-K", "filed": "2023-02-01" },
+            { "end": "2023-12-31", "val": 20, "fy": 2023, "fp": "FY", "form": "10-K", "filed": "2024-02-01" }
+          ]
+        }
+      },
+      "StockholdersEquity": {
+        "label": "Stockholders equity",
+        "units": {
+          "USD": [
+            { "end": "2021-12-31", "val": 800, "fy": 2021, "fp": "FY", "form": "10-K", "filed": "2022-02-01" },
+            { "end": "2022-12-31", "val": 950, "fy": 2022, "fp": "FY", "form": "10-K", "filed": "2023-02-01" },
+            { "end": "2023-12-31", "val": 1200, "fy": 2023, "fp": "FY", "form": "10-K", "filed": "2024-02-01" }
+          ]
+        }
+      },
+      "WeightedAverageNumberOfDilutedSharesOutstanding": {
+        "label": "Diluted shares",
+        "units": {
+          "shares": [
+            { "start": "2021-01-01", "end": "2021-12-31", "val": 100, "fy": 2021, "fp": "FY", "form": "10-K", "filed": "2022-02-01" },
+            { "start": "2022-01-01", "end": "2022-12-31", "val": 101, "fy": 2022, "fp": "FY", "form": "10-K", "filed": "2023-02-01" },
+            { "start": "2023-01-01", "end": "2023-12-31", "val": 102, "fy": 2023, "fp": "FY", "form": "10-K", "filed": "2024-02-01" }
+          ]
+        }
+      }
+    },
+    "dei": {}
+  }
+}
