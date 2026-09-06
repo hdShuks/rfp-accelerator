@@ -60,9 +60,8 @@ npm run dev       # the app now uses your subscription — no key needed
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build` | production build |
 
-CI (typecheck + test + build) lives at [`docs/ci.yml`](./docs/ci.yml) — move it to
-`.github/workflows/ci.yml` to activate it (needs a token with `workflow` scope:
-`gh auth refresh -s workflow`).
+CI (typecheck + test + build) runs on push/PR via
+[`.github/workflows/ci.yml`](./.github/workflows/ci.yml).
 
 ## Playbooks
 
