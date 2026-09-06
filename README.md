@@ -42,6 +42,10 @@ only), or set `ANTHROPIC_API_KEY` in `.env.local` for local dev.
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build` | production build |
 
+CI (typecheck + test + build) lives at [`docs/ci.yml`](./docs/ci.yml) — move it to
+`.github/workflows/ci.yml` to activate it (needs a token with `workflow` scope:
+`gh auth refresh -s workflow`).
+
 ## Playbooks
 
 One YAML file per proposal type in [`playbooks/`](./playbooks). Adding a type is a
