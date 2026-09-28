@@ -217,8 +217,9 @@ Resolved per request, in priority order:
 1. **User key** — pasted into a settings field, held in `sessionStorage` (gone on
    tab close), sent to the backend in the `x-anthropic-key` header over HTTPS.
    Used, never logged, never persisted.
-2. **`ANTHROPIC_API_KEY`** env — local dev fallback; unset in the public deploy so
-   the toolkit is truly BYO.
+2. **`ANTHROPIC_API_KEY`** env — set on the Vercel deployment (see DEPLOY.md)
+   so the deployed link and the Lovable frontend work without a pasted key;
+   left unset in `.env.local` so local dev falls through to mode 3 instead.
 3. **Local subscription mode** (`subscription.ts`) — shells out to the `claude`
    CLI, which authenticates with the user's Claude Pro/Max plan. Spend counts
    against the plan, not an API balance. Gated off when `process.env.VERCEL` is
