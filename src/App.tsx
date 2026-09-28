@@ -20,6 +20,7 @@ interface TargetForm {
 }
 
 const KEY_STORAGE = "rfp.anthropicKey";
+const RUN_ID_STORAGE = "rfp.runId";
 const MAX_UPLOAD_CHARS = 40_000; // mirrors the server-side cap in sanitize.ts
 
 async function readFileAsText(file: File): Promise<UploadedDoc> {
@@ -55,6 +56,12 @@ export default function App() {
   const [spent, setSpent] = useState(0);
   const [ceiling, setCeiling] = useState(0.5);
   const [notice, setNotice] = useState<{ kind: "warn" | "err"; text: string } | null>(null);
+  const [runId, setRunId] = useState<string | null>(null);
+  // Set when the events stream closes without a terminal event — the run is
+  // still "running" per the server but nothing is left producing events for
+  // it (dropped connection, or the process executing it died). Offers a
+  // resume instead of just looking hung.
+  const [stalled, setStalled] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -73,6 +80,20 @@ export default function App() {
       .then((r) => r.json())
       .then((d) => setLlm(d.llm ?? null))
       .catch(() => {});
+
+    // Reload/reconnect: if a run was in flight when this tab last closed,
+    // reattach to it — the events endpoint replays everything recorded so
+    // far and keeps tailing if it's still going.
+    try {
+      const savedRunId = sessionStorage.getItem(RUN_ID_STORAGE);
+      if (savedRunId) {
+        setRunId(savedRunId);
+        void watchRun(savedRunId);
+      }
+    } catch {
+      /* private mode */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function persistKey(k: string) {
@@ -107,6 +128,17 @@ export default function App() {
     setClientDocuments((prev) => [...prev, ...docs]);
   }
 
+  function saveRunId(id: string | null) {
+    setRunId(id);
+    try {
+      if (id) sessionStorage.setItem(RUN_ID_STORAGE, id);
+      else sessionStorage.removeItem(RUN_ID_STORAGE);
+    } catch {
+      /* private mode */
+    }
+  }
+
+  /** Kicks off a new run: POST returns a runId immediately, then we watch it. */
   async function run() {
     setRunning(true);
     setSteps([]);
@@ -116,14 +148,12 @@ export default function App() {
     setPlan(null);
     setSpent(0);
     setNotice(null);
-
-    const ac = new AbortController();
-    abortRef.current = ac;
+    setStalled(false);
+    saveRunId(null);
 
     try {
       const res = await fetch(apiUrl("/api/run"), {
         method: "POST",
-        signal: ac.signal,
         headers: {
           "Content-Type": "application/json",
           ...(apiKey ? { "x-anthropic-key": apiKey } : {}),
@@ -148,6 +178,33 @@ export default function App() {
         }),
       });
 
+      if (!res.ok) {
+        const msg = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        setNotice({ kind: "err", text: msg.error ?? `HTTP ${res.status}` });
+        setRunning(false);
+        return;
+      }
+
+      const { runId: newRunId } = (await res.json()) as { runId: string };
+      saveRunId(newRunId);
+      await watchRun(newRunId);
+    } catch (err) {
+      setNotice({ kind: "err", text: err instanceof Error ? err.message : String(err) });
+      setRunning(false);
+    }
+  }
+
+  /** Attaches to a run's event stream: replays everything recorded so far, then tails live events if it's still going. Also how a reload/reconnect resumes watching. */
+  async function watchRun(id: string) {
+    setRunning(true);
+    setStalled(false);
+
+    const ac = new AbortController();
+    abortRef.current = ac;
+    let sawTerminal = false;
+
+    try {
+      const res = await fetch(apiUrl(`/api/run/${id}/events`), { signal: ac.signal });
       if (!res.ok || !res.body) {
         const msg = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         setNotice({ kind: "err", text: msg.error ?? `HTTP ${res.status}` });
@@ -171,7 +228,9 @@ export default function App() {
           const payload = line.slice(6);
           if (!payload.trim() || payload.trim() === "{}") continue;
           try {
-            handleEvent(JSON.parse(payload) as RunEvent);
+            const ev = JSON.parse(payload) as RunEvent;
+            if (ev.type === "run_completed" || ev.type === "run_failed") sawTerminal = true;
+            handleEvent(ev);
           } catch {
             /* skip malformed */
           }
@@ -184,6 +243,31 @@ export default function App() {
     } finally {
       setRunning(false);
       abortRef.current = null;
+      if (sawTerminal) {
+        saveRunId(null);
+      } else {
+        setStalled(true);
+      }
+    }
+  }
+
+  /** Re-invokes a halted/orphaned run from where it left off, then watches it again. */
+  async function resumeRun() {
+    if (!runId) return;
+    setNotice(null);
+    try {
+      const res = await fetch(apiUrl(`/api/run/${runId}/resume`), {
+        method: "POST",
+        headers: apiKey ? { "x-anthropic-key": apiKey } : {},
+      });
+      if (!res.ok) {
+        const msg = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        setNotice({ kind: "err", text: msg.error ?? `HTTP ${res.status}` });
+        return;
+      }
+      await watchRun(runId);
+    } catch (err) {
+      setNotice({ kind: "err", text: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -354,9 +438,21 @@ export default function App() {
             {running ? "Running…" : "Run accelerator"}
           </button>
           {running && (
-            <button style={{ width: "100%", marginTop: 8 }} onClick={() => abortRef.current?.abort()}>
-              Stop
+            <button
+              style={{ width: "100%", marginTop: 8 }}
+              onClick={() => abortRef.current?.abort()}
+              title="Stops watching — the run keeps going on the server and can be reattached to later."
+            >
+              Stop watching
             </button>
+          )}
+          {stalled && runId && (
+            <div className="hint" style={{ marginTop: 8 }}>
+              <p>Lost the run&rsquo;s progress stream before it finished. It may still be going server-side.</p>
+              <button style={{ width: "100%" }} onClick={resumeRun} disabled={running}>
+                Resume run
+              </button>
+            </div>
           )}
 
           {llm && !llm.needsUserKey && !apiKey && (

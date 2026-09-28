@@ -10,8 +10,21 @@ on `main`.
 lovable branch  ──HTTP──▶  main branch (Vercel)  ──▶  SEC EDGAR + Claude
    (this UI)                 /api/playbooks
                              /api/health
-                             /api/run  (SSE)
+                             /api/run                POST — starts a run, returns { runId }
+                             /api/run/:id/events      GET  — SSE: replay + poll until done
+                             /api/run/:id/resume      POST — resume a halted/failed run
 ```
+
+A run is now two steps, not one: `POST /api/run` returns immediately with a
+`runId` while the orchestration executes in the background on `main`, and
+`GET /api/run/:id/events` is how this UI watches it (replays everything
+recorded so far, then polls for new events). This means a dropped
+connection or a page reload doesn't lose progress — the UI persists the
+in-flight `runId` to `sessionStorage` and reattaches to the same events
+stream on load. If the stream ever closes without a terminal event (the run
+stalled — e.g. it outlived one Vercel function invocation, or hit its
+budget ceiling), the UI offers a "Resume run" button that calls
+`POST /api/run/:id/resume`.
 
 ## Local dev
 
