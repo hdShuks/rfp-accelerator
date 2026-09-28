@@ -46,12 +46,21 @@ lives at `data/orchestration-learning.md` (gitignored, local-dev only).
 
 1. **User-pasted API key** — sent per-request via `x-anthropic-key` header,
    held client-side in `sessionStorage`, never logged/persisted server-side.
-2. **`ANTHROPIC_API_KEY`** env var — local dev fallback.
+2. **`ANTHROPIC_API_KEY`** env var — **set on the Vercel deployment** (see
+   DEPLOY.md) so anyone hitting `main`'s API there — directly, or via the
+   Lovable-hosted frontend pointed at it — uses this key's API credits
+   without needing to paste one. Bounded per run by `MAX_RUN_USD`; the
+   accepted trade-off for a private/unlisted demo link (see DEPLOY.md for
+   the BYO-key alternative if you'd rather not take that exposure).
 3. **Local subscription mode** (`src/lib/llm/subscription.ts`) — shells out to
    the `claude` CLI (spawn + stdin, parses its `--output-format json`), which
    authenticates with a Claude Pro/Max subscription. **This is what Harsh uses
    locally** — he has Pro + usage credits but no separate API balance. Gated
-   off automatically when `process.env.VERCEL` is set, or via `RFP_LLM_MODE=api`.
+   off automatically when `process.env.VERCEL` is set, or via `RFP_LLM_MODE=api`
+   — so it's simply never reachable on Vercel/Lovable regardless of the above;
+   the one `main` codebase picks the right mode per environment on its own.
+   Keep `ANTHROPIC_API_KEY` unset in `.env.local` (as it is now) so local dev
+   keeps falling through to this instead of spending API credits.
 
 **If you're running this in a Claude Code cloud/remote environment**: check
 whether a `claude` binary is on `PATH` there (`which claude`) — if the cloud
@@ -259,8 +268,12 @@ kept current and is more detailed than this file on every subsystem.
 - **Cost discipline**: tiered models (Haiku for cheap/mechanical work, Sonnet
   for synthesis), a hard per-run USD ceiling that halts and returns partial
   results rather than overrunning, deterministic math wherever possible.
-- **BYO-key for any real deploy** — never let `ANTHROPIC_API_KEY` be set on
-  the public Vercel deployment.
+- **`ANTHROPIC_API_KEY` is deliberately set on the Vercel deployment** (as of
+  this handoff) so the deployed link and the Lovable frontend work without a
+  pasted key — a conscious choice to accept per-run-bounded (`MAX_RUN_USD`)
+  exposure on that key for a private/unlisted link, not a public one. If this
+  is ever shared more broadly, switch back to BYO-key (leave the var unset)
+  per DEPLOY.md.
 - Small, tested, honestly-documented steps over big untested leaps — every
   subsystem above has unit tests, and the newest/riskiest layer (§6) got a
   live end-to-end check before being called done, not just mocked tests.
