@@ -46,12 +46,17 @@ lives at `data/orchestration-learning.md` (gitignored, local-dev only).
 
 1. **User-pasted API key** — sent per-request via `x-anthropic-key` header,
    held client-side in `sessionStorage`, never logged/persisted server-side.
-2. **`ANTHROPIC_API_KEY`** env var — **set on the Vercel deployment** (see
-   DEPLOY.md) so anyone hitting `main`'s API there — directly, or via the
-   Lovable-hosted frontend pointed at it — uses this key's API credits
-   without needing to paste one. Bounded per run by `MAX_RUN_USD`; the
-   accepted trade-off for a private/unlisted demo link (see DEPLOY.md for
-   the BYO-key alternative if you'd rather not take that exposure).
+   **This is the only mode on the public Vercel deployment.** The link goes
+   out to anyone evaluating the project (recruiters, other engineers,
+   strangers off a portfolio link), not a handful of trusted people, and
+   Harsh never wants to be the one paying for their runs — every visitor
+   spends against their own budget, capped per run by `MAX_RUN_USD`, with
+   the live spend meter in the UI showing it as it happens.
+2. **`ANTHROPIC_API_KEY`** env var — **local dev only, never set on Vercel.**
+   Local dev keeps it unset in `.env.local` anyway (falls through to mode 3),
+   but the ground rule is broader than that: this var must never be set on
+   the public deployment, full stop — there is deliberately no fallback that
+   lets a site visitor spend Harsh's own API credits. See DEPLOY.md.
 3. **Local subscription mode** (`src/lib/llm/subscription.ts`) — shells out to
    the `claude` CLI (spawn + stdin, parses its `--output-format json`), which
    authenticates with a Claude Pro/Max subscription. **This is what Harsh uses
@@ -268,12 +273,16 @@ kept current and is more detailed than this file on every subsystem.
 - **Cost discipline**: tiered models (Haiku for cheap/mechanical work, Sonnet
   for synthesis), a hard per-run USD ceiling that halts and returns partial
   results rather than overrunning, deterministic math wherever possible.
-- **`ANTHROPIC_API_KEY` is deliberately set on the Vercel deployment** (as of
-  this handoff) so the deployed link and the Lovable frontend work without a
-  pasted key — a conscious choice to accept per-run-bounded (`MAX_RUN_USD`)
-  exposure on that key for a private/unlisted link, not a public one. If this
-  is ever shared more broadly, switch back to BYO-key (leave the var unset)
-  per DEPLOY.md.
+- **Strict BYO-key on the public deployment, permanently** — `ANTHROPIC_API_KEY`
+  must never be set on Vercel. This link is shown to whoever's evaluating the
+  project (recruiters, engineers, anyone), not a closed group, and Harsh is
+  never the one who bears the cost of someone else running it. Every visitor
+  pastes their own key and spends against their own budget, capped per run by
+  `MAX_RUN_USD`, with the spend shown live in the UI as it happens. (An
+  earlier version of this handoff briefly recommended the opposite —
+  setting the key on Vercel for a frictionless demo — before this was
+  clarified as public-facing. That guidance was wrong for this project;
+  don't resurrect it.)
 - Small, tested, honestly-documented steps over big untested leaps — every
   subsystem above has unit tests, and the newest/riskiest layer (§6) got a
   live end-to-end check before being called done, not just mocked tests.
