@@ -8,6 +8,7 @@ import { financialsArtifact, narrativeOrProfileArtifact } from "./company";
 import { appendLearningRecord } from "./learning";
 import { planSteps } from "./planner";
 import { buildResearchPrompt, buildSynthesisPrompt, SYSTEM_PROMPT } from "./prompts";
+import type { StepCost } from "@/lib/llm/budget";
 import type { Artifact, CompanyRef, RunEvent, RunInput } from "./types";
 
 const DEFAULT_TIER: Record<Step["tool"], ModelTier> = {
@@ -35,17 +36,38 @@ function subId(stepId: string, index: number): string {
   return `${stepId}::${index}`;
 }
 
+export interface ResumeOptions {
+  /** Reuse an existing run id (resuming a run already tracked in the store) instead of minting a new one. */
+  runId?: string;
+  /**
+   * Artifacts already produced for these concrete step ids in a prior
+   * attempt — replayed as `step_completed` instead of recomputed. Keyed by
+   * the same id the step would otherwise be stamped with (`subId()` for a
+   * `for_each` iteration), so a partially-completed fan-out resumes only the
+   * targets that hadn't finished. If the freshly-planned steps don't line up
+   * with these ids (planner picked a different plan on resume), the affected
+   * steps simply recompute — never incorrect, just not free.
+   */
+  resumeArtifacts?: Map<string, Artifact>;
+  /** Spend already recorded in a prior attempt, so the budget ceiling accounts for it rather than resetting. */
+  resumeSpent?: StepCost[];
+}
+
 /**
  * Run one orchestration as an async event stream. The whole pipeline executes
- * inside this generator; the caller (SSE route) forwards each event to the
- * client. Halts cleanly on budget exhaustion, returning partial artifacts.
+ * inside this generator; the caller (the run store's background executor)
+ * persists and forwards each event to any listening client. Halts cleanly on
+ * budget exhaustion, returning partial artifacts — and can be resumed via
+ * `opts.resumeArtifacts`/`resumeSpent` from wherever it left off.
  */
 export async function* runOrchestration(
   input: RunInput,
   apiKey?: string | null,
+  opts: ResumeOptions = {},
 ): AsyncGenerator<RunEvent, void, void> {
-  const runId = randomUUID();
-  const budget = new RunBudget(ceilingUsd());
+  const runId = opts.runId ?? randomUUID();
+  const budget = new RunBudget(ceilingUsd(), opts.resumeSpent ?? []);
+  const resumeArtifacts = opts.resumeArtifacts ?? new Map<string, Artifact>();
 
   let basePlaybook: Playbook;
   let classification;
@@ -115,6 +137,14 @@ export async function* runOrchestration(
       for (let i = 0; i < targets.length; i++) {
         const id = subId(stepId, i);
         const itemTitle = `${title} — ${targets[i].name}`;
+        const cached = resumeArtifacts.get(id);
+        if (cached) {
+          yield { type: "step_started", stepId: id, title: itemTitle, tool: step.tool };
+          artifacts.set(id, cached);
+          yield { type: "step_completed", stepId: id, artifact: cached };
+          yield budgetEvent(budget);
+          continue;
+        }
         yield { type: "step_started", stepId: id, title: itemTitle, tool: step.tool };
         try {
           const artifact = yield* runStep(step, input, playbook, deps, apiKey, budget, {
@@ -135,6 +165,15 @@ export async function* runOrchestration(
           yield { type: "step_failed", stepId: id, error: errMsg(err) };
         }
       }
+      continue;
+    }
+
+    const cachedSingle = resumeArtifacts.get(stepId);
+    if (cachedSingle) {
+      yield { type: "step_started", stepId, title, tool: step.tool };
+      artifacts.set(stepId, cachedSingle);
+      yield { type: "step_completed", stepId, artifact: cachedSingle };
+      yield budgetEvent(budget);
       continue;
     }
 

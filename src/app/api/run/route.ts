@@ -1,10 +1,14 @@
+import { after } from "next/server";
 import { assertLlmReachable, MissingApiKeyError } from "@/lib/llm/anthropic";
-import { runOrchestration } from "@/lib/orchestrator/runner";
+import { prepareRun } from "@/lib/orchestrator/execute";
 import { sanitizeRunInput } from "@/lib/orchestrator/sanitize";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// Give the orchestration room on Vercel Fluid (see SPEC §7 for the resumable design).
+// The run itself now executes via after() below, decoupled from this
+// response — see /api/run/[id]/events for how a client watches it. This
+// ceiling still bounds how long the background work gets on Vercel Fluid;
+// see SPEC §7.
 export const maxDuration = 300;
 
 export async function POST(req: Request) {
@@ -28,32 +32,10 @@ export async function POST(req: Request) {
     return json({ error: err instanceof Error ? err.message : "Auth failed" }, status);
   }
 
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const send = (obj: unknown) =>
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-      try {
-        for await (const event of runOrchestration(input, userKey)) {
-          send(event);
-        }
-      } catch (err) {
-        send({ type: "run_failed", runId: "", error: err instanceof Error ? err.message : String(err) });
-      } finally {
-        controller.enqueue(encoder.encode("event: done\ndata: {}\n\n"));
-        controller.close();
-      }
-    },
-  });
+  const { runId, run } = await prepareRun(input, userKey);
+  after(run);
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    },
-  });
+  return json({ runId }, 202);
 }
 
 function json(obj: unknown, status: number): Response {

@@ -27,9 +27,15 @@ export interface StepCost {
  * after.
  */
 export class RunBudget {
-  private steps: StepCost[] = [];
+  private steps: StepCost[];
 
-  constructor(readonly ceilingUsd: number) {}
+  /** `initialSteps` seeds prior spend (e.g. resuming a halted run) so the ceiling accounts for money already spent. */
+  constructor(
+    readonly ceilingUsd: number,
+    initialSteps: StepCost[] = [],
+  ) {
+    this.steps = [...initialSteps];
+  }
 
   get spentUsd(): number {
     return this.steps.reduce((s, x) => s + x.usd, 0);
