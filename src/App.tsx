@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiUrl } from "./api";
 import { renderMarkdown } from "./markdown";
-import type { Artifact, Classification, LlmHealth, PlaybookMeta, RunEvent } from "./types";
+import type { Artifact, Classification, LlmHealth, PlanSummary, PlaybookMeta, RunEvent, UploadedDoc } from "./types";
 
 type StepStatus = "pending" | "running" | "done" | "failed";
 interface StepView {
@@ -12,7 +12,24 @@ interface StepView {
   detail?: string;
 }
 
+interface TargetForm {
+  name: string;
+  ticker: string;
+  notes: string;
+  documents: UploadedDoc[];
+}
+
 const KEY_STORAGE = "rfp.anthropicKey";
+const MAX_UPLOAD_CHARS = 40_000; // mirrors the server-side cap in sanitize.ts
+
+async function readFileAsText(file: File): Promise<UploadedDoc> {
+  const text = await file.text();
+  return { filename: file.name, text: text.slice(0, MAX_UPLOAD_CHARS) };
+}
+
+function emptyTarget(): TargetForm {
+  return { name: "", ticker: "", notes: "", documents: [] };
+}
 
 export default function App() {
   const [apiKey, setApiKey] = useState("");
@@ -21,15 +38,20 @@ export default function App() {
 
   const [clientName, setClientName] = useState("");
   const [clientTicker, setClientTicker] = useState("");
-  const [targetTicker, setTargetTicker] = useState("");
+  const [clientType, setClientType] = useState<"corporate" | "pe_sponsor">("corporate");
+  const [clientNotes, setClientNotes] = useState("");
+  const [clientDocuments, setClientDocuments] = useState<UploadedDoc[]>([]);
   const [proposalType, setProposalType] = useState("");
   const [description, setDescription] = useState("");
+  const [stepInstructions, setStepInstructions] = useState("");
+  const [targets, setTargets] = useState<TargetForm[]>([]);
 
   const [running, setRunning] = useState(false);
   const [steps, setSteps] = useState<StepView[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [proposal, setProposal] = useState<string | null>(null);
   const [classification, setClassification] = useState<Classification | null>(null);
+  const [plan, setPlan] = useState<PlanSummary | null>(null);
   const [spent, setSpent] = useState(0);
   const [ceiling, setCeiling] = useState(0.5);
   const [notice, setNotice] = useState<{ kind: "warn" | "err"; text: string } | null>(null);
@@ -64,10 +86,26 @@ export default function App() {
   }
 
   const canRun = clientName.trim().length > 0 && !running;
-  const showTarget = useMemo(() => {
-    const t = proposalType.toLowerCase();
-    return t === "" || t.includes("ma_") || t.includes("m&a") || t.includes("acqui");
-  }, [proposalType]);
+
+  function addTarget() {
+    setTargets((prev) => [...prev, emptyTarget()]);
+  }
+  function updateTarget(i: number, patch: Partial<TargetForm>) {
+    setTargets((prev) => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
+  }
+  function removeTarget(i: number) {
+    setTargets((prev) => prev.filter((_, idx) => idx !== i));
+  }
+  async function addTargetFiles(i: number, files: FileList | null) {
+    if (!files?.length) return;
+    const docs = await Promise.all([...files].map(readFileAsText));
+    setTargets((prev) => prev.map((t, idx) => (idx === i ? { ...t, documents: [...t.documents, ...docs] } : t)));
+  }
+  async function addClientFiles(files: FileList | null) {
+    if (!files?.length) return;
+    const docs = await Promise.all([...files].map(readFileAsText));
+    setClientDocuments((prev) => [...prev, ...docs]);
+  }
 
   async function run() {
     setRunning(true);
@@ -75,6 +113,7 @@ export default function App() {
     setArtifacts([]);
     setProposal(null);
     setClassification(null);
+    setPlan(null);
     setSpent(0);
     setNotice(null);
 
@@ -89,7 +128,24 @@ export default function App() {
           "Content-Type": "application/json",
           ...(apiKey ? { "x-anthropic-key": apiKey } : {}),
         },
-        body: JSON.stringify({ clientName, clientTicker, targetTicker, proposalType, description }),
+        body: JSON.stringify({
+          clientName,
+          clientTicker,
+          clientType,
+          clientNotes,
+          clientDocuments,
+          proposalType,
+          description,
+          stepInstructions,
+          targets: targets
+            .filter((t) => t.name.trim())
+            .map((t) => ({
+              name: t.name.trim(),
+              ticker: t.ticker.trim() || undefined,
+              notes: t.notes.trim() || undefined,
+              documents: t.documents.length ? t.documents : undefined,
+            })),
+        }),
       });
 
       if (!res.ok || !res.body) {
@@ -137,10 +193,19 @@ export default function App() {
         setClassification(ev.classification);
         setSteps(ev.steps.map((s) => ({ id: s.id, title: s.title, status: "pending" as StepStatus })));
         break;
+      case "plan_ready":
+        setPlan(ev.plan);
+        break;
       case "step_started":
-        setSteps((prev) =>
-          prev.map((s) => (s.id === ev.stepId ? { ...s, status: "running", tool: ev.tool, detail: undefined } : s)),
-        );
+        setSteps((prev) => {
+          const found = prev.some((s) => s.id === ev.stepId);
+          if (found) {
+            return prev.map((s) =>
+              s.id === ev.stepId ? { ...s, status: "running", tool: ev.tool, detail: undefined } : s,
+            );
+          }
+          return [...prev, { id: ev.stepId, title: ev.title, status: "running", tool: ev.tool }];
+        });
         break;
       case "step_progress":
         setSteps((prev) => prev.map((s) => (s.id === ev.stepId ? { ...s, detail: ev.message } : s)));
@@ -206,15 +271,57 @@ export default function App() {
           <div className="row">
             <div>
               <label htmlFor="clientTicker">Client ticker</label>
-              <input id="clientTicker" value={clientTicker} onChange={(e) => setClientTicker(e.target.value.toUpperCase())} placeholder="NWM" />
+              <input id="clientTicker" value={clientTicker} onChange={(e) => setClientTicker(e.target.value.toUpperCase())} placeholder="NWM (leave blank if private)" />
             </div>
-            {showTarget && (
-              <div>
-                <label htmlFor="targetTicker">Target ticker</label>
-                <input id="targetTicker" value={targetTicker} onChange={(e) => setTargetTicker(e.target.value.toUpperCase())} placeholder="ACME" />
-              </div>
-            )}
+            <div>
+              <label htmlFor="clientType">Client is a…</label>
+              <select id="clientType" value={clientType} onChange={(e) => setClientType(e.target.value as typeof clientType)}>
+                <option value="corporate">Corporate</option>
+                <option value="pe_sponsor">PE sponsor</option>
+              </select>
+            </div>
           </div>
+
+          <label htmlFor="clientNotes">Client notes (if private / no ticker)</label>
+          <textarea
+            id="clientNotes"
+            value={clientNotes}
+            onChange={(e) => setClientNotes(e.target.value)}
+            placeholder="What the client does, scale, anything relevant — used to ground the AI-generated profile."
+            style={{ minHeight: 56 }}
+          />
+          <FileAttach onFiles={addClientFiles} docs={clientDocuments} onRemove={(i) => setClientDocuments((d) => d.filter((_, idx) => idx !== i))} />
+
+          <label>Targets / comparables (optional)</label>
+          <p className="hint" style={{ marginTop: -2 }}>
+            Acquisition targets, portfolio companies, or competitors to research — none, one, or many.
+            No ticker? Attach a doc or add notes and we&apos;ll generate an AI profile instead of EDGAR data.
+          </p>
+          {targets.map((t, i) => (
+            <div key={i} className="target-row">
+              <div className="row">
+                <input value={t.name} onChange={(e) => updateTarget(i, { name: e.target.value })} placeholder="Target/comparable name *" />
+                <input value={t.ticker} onChange={(e) => updateTarget(i, { ticker: e.target.value.toUpperCase() })} placeholder="Ticker (optional)" />
+              </div>
+              <textarea
+                value={t.notes}
+                onChange={(e) => updateTarget(i, { notes: e.target.value })}
+                placeholder="Notes (optional) — helps if there's no ticker"
+                style={{ minHeight: 44 }}
+              />
+              <FileAttach
+                onFiles={(files) => addTargetFiles(i, files)}
+                docs={t.documents}
+                onRemove={(di) => updateTarget(i, { documents: t.documents.filter((_, idx) => idx !== di) })}
+              />
+              <button onClick={() => removeTarget(i)} style={{ marginTop: 4 }}>
+                Remove
+              </button>
+            </div>
+          ))}
+          <button onClick={addTarget} style={{ marginTop: 8 }}>
+            + Add target/comparable
+          </button>
 
           <label htmlFor="proposalType">Proposal type</label>
           <select id="proposalType" value={proposalType} onChange={(e) => setProposalType(e.target.value)}>
@@ -232,6 +339,15 @@ export default function App() {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Free text from the RFP or partner. Used to classify the engagement and steer research."
+          />
+
+          <label htmlFor="stepInstructions">Orchestration notes (optional)</label>
+          <textarea
+            id="stepInstructions"
+            value={stepInstructions}
+            onChange={(e) => setStepInstructions(e.target.value)}
+            placeholder='e.g. "also look at precedent transactions" or "skip market context"'
+            style={{ minHeight: 56 }}
           />
 
           <button className="primary" disabled={!canRun} onClick={run}>
@@ -275,6 +391,14 @@ export default function App() {
               {(classification.confidence * 100).toFixed(0)}%
               <br />
               <span style={{ color: "var(--muted)" }}>{classification.rationale}</span>
+            </p>
+          )}
+
+          {plan && (plan.added.length > 0 || plan.removed.length > 0) && (
+            <p className="hint" style={{ marginTop: 0 }}>
+              Orchestration adjusted: {plan.added.length > 0 && <>added <strong>{plan.added.join(", ")}</strong>. </>}
+              {plan.removed.length > 0 && <>skipped <strong>{plan.removed.join(", ")}</strong>. </>}
+              {plan.rationale}
             </p>
           )}
 
@@ -339,11 +463,54 @@ export default function App() {
         <p>
           Rebuilds a general pattern — classify an RFP, run an orchestrated research sequence, pull
           SEC EDGAR data, synthesize with an LLM — from public building blocks. Financial figures come
-          from EDGAR XBRL <code>companyfacts</code> and ratios are computed in code. Narrative
-          extraction from 10-K HTML is best-effort. Not investment advice. Vercel Hobby is
-          non-commercial use only.
+          from EDGAR XBRL <code>companyfacts</code> and ratios are computed in code. When a company has
+          no ticker or EDGAR can&apos;t resolve it, its profile is AI-generated and clearly labelled as
+          such — never presented as filed data. The orchestration plan itself is decided by a cheap
+          planning pass that can add steps (precedent transactions, competitor landscape) when the
+          brief calls for it or you ask via the orchestration notes field. Not investment advice.
         </p>
       </details>
+    </div>
+  );
+}
+
+function FileAttach({
+  onFiles,
+  docs,
+  onRemove,
+}: {
+  onFiles: (files: FileList | null) => void;
+  docs: UploadedDoc[];
+  onRemove: (i: number) => void;
+}) {
+  return (
+    <div style={{ marginTop: 6, marginBottom: 8 }}>
+      <input
+        type="file"
+        accept=".txt,.md,text/plain,text/markdown"
+        multiple
+        onChange={(e) => {
+          onFiles(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      <p className="hint" style={{ marginTop: 2 }}>
+        Plain text or Markdown only for now — paste PDF/deck content into a .txt file.
+      </p>
+      {docs.length > 0 && (
+        <ul style={{ listStyle: "none", padding: 0, margin: "4px 0 0", fontSize: 12 }}>
+          {docs.map((d, i) => (
+            <li key={i} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <span>
+                📎 {d.filename} ({(d.text.length / 1000).toFixed(1)}k chars)
+              </span>
+              <button onClick={() => onRemove(i)} style={{ padding: "1px 8px", fontSize: 11 }}>
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

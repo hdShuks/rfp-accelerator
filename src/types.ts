@@ -7,9 +7,38 @@ export interface PlaybookMeta {
   description: string;
 }
 
+export interface UploadedDoc {
+  filename: string;
+  text: string;
+}
+
+export type ClientType = "corporate" | "pe_sponsor";
+
+export interface CompanyRef {
+  name: string;
+  ticker?: string;
+  notes?: string;
+  documents?: UploadedDoc[];
+}
+
+export interface RunInput {
+  clientName: string;
+  clientTicker?: string;
+  clientType?: ClientType;
+  clientNotes?: string;
+  clientDocuments?: UploadedDoc[];
+  targets?: CompanyRef[];
+  proposalType?: string;
+  description?: string;
+  stepInstructions?: string;
+  forceSteps?: string[];
+  skipSteps?: string[];
+}
+
 export type ArtifactKind =
   | "financial_summary"
   | "narrative_extract"
+  | "company_profile"
   | "research_note"
   | "synthesis_note"
   | "proposal_skeleton";
@@ -40,6 +69,13 @@ export interface StepCost {
   usd: number;
 }
 
+export interface PlanSummary {
+  steps: { id: string; title: string }[];
+  added: string[];
+  removed: string[];
+  rationale: string;
+}
+
 export type RunEvent =
   | {
       type: "run_started";
@@ -49,6 +85,7 @@ export type RunEvent =
       steps: { id: string; title: string }[];
       classification: Classification;
     }
+  | { type: "plan_ready"; plan: PlanSummary }
   | { type: "step_started"; stepId: string; title: string; tool: string }
   | { type: "step_progress"; stepId: string; message: string }
   | { type: "step_completed"; stepId: string; artifact: Artifact }

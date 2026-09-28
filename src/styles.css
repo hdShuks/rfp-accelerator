@@ -121,6 +121,14 @@ textarea {
   gap: 10px;
 }
 
+.target-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  margin: 8px 0;
+  background: var(--bg);
+}
+
 button {
   font: inherit;
   font-weight: 600;
