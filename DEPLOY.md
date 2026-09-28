@@ -21,7 +21,13 @@ Two surfaces, kept on **separate branches** so they don't fight over the repo:
 4. Deploy. Every push to `main` redeploys.
 
 Notes:
-- `/api/run` streams over SSE inside one request; `maxDuration = 300` (Vercel Fluid). If runs get longer, move to the resumable design in `SPEC.md` §7.
+- `/api/run` returns a `run_id` immediately and executes in the background
+  (Next's `after()`); `GET /api/run/:id/events` is how a client watches it,
+  replay-then-poll, surviving a dropped connection or reload. Each background
+  execution is still bounded by `maxDuration = 300` (Vercel Fluid) — a run
+  that doesn't finish in that window halts and `POST /api/run/:id/resume`
+  picks it back up. See `SPEC.md` §7 for what's still simplified here (the
+  run store is file-backed, ephemeral across cold starts on Vercel).
 - Local subscription mode is automatically disabled on Vercel (`process.env.VERCEL`).
 - Vercel **Hobby is non-commercial only** — private demo use is fine, paid client work needs Pro.
 

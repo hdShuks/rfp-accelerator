@@ -23,7 +23,7 @@ architecture. This file is a status snapshot + pointers, not a replacement.
 ## 2. Stack
 
 Next.js 15 (App Router) + TypeScript + React 19, on `main`. Vitest for tests
-(84 passing as of this handoff). No database — EDGAR responses cache to disk
+(113 passing as of this handoff). No database — EDGAR responses cache to disk
 (`.edgar-cache/`, gitignored), and a small append-only Markdown "learning log"
 lives at `data/orchestration-learning.md` (gitignored, local-dev only).
 
@@ -97,13 +97,21 @@ src/lib/orchestrator/
   sanitize.ts             caps/validates the API request body
   prompts.ts              all prompt templates, incl. the planner's prompt
   format.ts               FinancialSummary/NarrativeExtract → Markdown
-  runner.ts               the async-generator orchestration loop
+  runner.ts               the async-generator orchestration loop; takes an
+                          optional resumeArtifacts/resumeSpent to skip
+                          already-completed steps — see §7 item 1
+  store.ts                RunStore: durable run state (input/events/status/
+                          artifacts), file-backed under .runs-cache/
+  tail.ts                 pure decision logic for one events-route poll tick
+  execute.ts              glue: store + runner, used by all three routes below
 
 src/app/                 Next.js UI (page.tsx) + API routes:
   api/playbooks           GET — list available playbooks
   api/classify             POST — classify a brief without running it
   api/health               GET — how Claude is currently reachable
-  api/run                  POST — SSE stream of RunEvents (the main endpoint)
+  api/run                  POST — starts a run in the background, returns { runId }
+  api/run/[id]/events      GET — SSE: replay + poll until a terminal event
+  api/run/[id]/resume      POST — re-invoke a halted/failed/orphaned run
   middleware.ts             CORS for /api/* (so the lovable frontend can call it)
 ```
 
@@ -165,11 +173,41 @@ competitor landscape"`. Results:
 
 ## 7. Immediate next steps, roughly in priority order
 
-1. **Resumable runs** (SPEC §7): `/api/run` returns a `run_id` immediately,
-   steps persist to a real store, a `GET /api/run/:id/events` endpoint
-   replays+tails via SSE, each step independently retryable. This directly
-   addresses the Vercel-timeout finding above and is probably the single
-   highest-value next change.
+1. ~~**Resumable runs**~~ — **done.** `POST /api/run` returns a `run_id`
+   immediately and executes in the background (Next's `after()`);
+   `GET /api/run/:id/events` replays everything recorded so far, then polls
+   the store for new events (see `src/lib/orchestrator/store.ts` / `tail.ts`
+   / `execute.ts`); `POST /api/run/:id/resume` re-invokes a halted/failed/
+   orphaned run, skipping already-completed steps and honoring prior spend.
+   Live-verified end to end (real subscription-mode calls, a tiny-budget
+   halt, then a resume under a normal budget that correctly skipped the two
+   cached steps and finished the run). Two real bugs surfaced along the way,
+   both with regression tests, both worth knowing if you touch this code:
+   - **Next.js bundles each Route Handler separately** — `/api/run`,
+     `/api/run/:id/events`, and `/api/run/:id/resume` share *no* in-process
+     module state, even under `next dev`, not just across separate Vercel
+     invocations. An in-memory pub/sub for live-tailing was tried first and
+     abandoned for exactly this reason. The run store must be the only
+     shared source of truth, and no call site may assume it's the same
+     store instance that saw any prior operation — see the regression test
+     in `store.test.ts`.
+   - A resumed run's event log keeps the prior attempt's terminal event
+     sitting mid-array, followed by a fresh `run_started` and more real
+     progress — the events route must not treat seeing a
+     `run_completed`/`run_failed` *type* during replay as "stop", only the
+     store's current `status` field decides that. See `tail.ts` and its
+     tests.
+   - **Still simplified, flagged in SPEC §7**: the store is file-backed
+     (`.runs-cache/`, gitignored, same convention as the EDGAR cache) —
+     ephemeral across Vercel cold starts, not a fix for multiple concurrent
+     instances; and a run longer than one function invocation's `after()`
+     window still needs something to call `/resume`, there's no true
+     background worker yet.
+   - **`lovable` was NOT updated to match** — its `src/App.tsx` still
+     expects the old single-request SSE contract from `POST /api/run`. Port
+     the two-step POST-then-watch flow from `src/app/page.tsx` (the
+     `run()`/`watchRun()`/`resumeRun()` functions) into `lovable` before
+     deploying that branch against this `main`.
 2. **UI for `forceSteps`/`skipSteps`** — the backend/planner already support
    hard overrides; only a free-text field is exposed. A checklist of
    default+catalog steps the user can tick/untick would close this cleanly.
@@ -203,7 +241,7 @@ Claude access: paste a key in the running UI, or set `ANTHROPIC_API_KEY` in
 see §4.
 
 ```bash
-npm test          # vitest — 84 tests as of this handoff
+npm test          # vitest — 113 tests as of this handoff
 npm run typecheck # tsc --noEmit
 npm run build     # next build
 ```

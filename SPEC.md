@@ -49,11 +49,19 @@ Synthesizer ── assembles Artifacts into a proposal skeleton (Markdown)
 Learning log ── appends what was planned vs. the default, and why, for next time
 ```
 
-Each run streams progress to the client over SSE. The whole orchestration
-executes inside one streaming HTTP response (fits Vercel Fluid's 300s ceiling for
-the MVP; see §7 for the resumable design we'd move to if runs get longer — a
-multi-target M&A run with an added catalog step and effort-high synthesis has
-been observed to approach that ceiling end-to-end, so this isn't theoretical).
+`POST /api/run` returns a `run_id` immediately; the orchestration itself runs
+in the background (Next's `after()`) and persists every event to a run store
+(`src/lib/orchestrator/store.ts`) as it goes. `GET /api/run/:id/events`
+replays everything recorded so far over SSE, then polls the store for new
+events until a terminal one lands — so a dropped connection, a page reload,
+or a run outliving one Vercel function invocation (still bounded by
+`maxDuration = 300`, but no longer fatal to watching it) all just mean
+reconnecting to the same `run_id`. If a run goes quiet for a while
+(`STALL_MS` in store.ts) without finishing, `POST /api/run/:id/resume`
+re-invokes it: already-completed steps replay from the store instead of
+recomputing, and prior spend counts against the budget ceiling. See §7 for
+what's still simplified about this (file-backed store, no true background
+worker beyond one function's `after()` window).
 
 ### Companies, not just tickers
 
@@ -260,11 +268,23 @@ Commit after each slice.
 
 ## 7. Later (not in MVP)
 
-- Resumable runs: `POST /api/run` returns `run_id` immediately, steps persisted to
-  a store (KV/Postgres), `GET /api/run/:id/events` replays + tails via SSE, each
-  step independently retryable. Needed if runs exceed the function ceiling —
-  and a multi-target run with an added catalog step has already been observed
-  to approach 300s end-to-end, so this is the most load-bearing item here now.
+- **Resumable runs landed, but the store is still file-backed** (`.runs-cache/`,
+  gitignored, same convention as the EDGAR cache and the learning log) — fine
+  for local dev and a single long-lived instance, but ephemeral across Vercel
+  cold starts and not shared between concurrent instances. Put a real store
+  (KV/Postgres) behind `src/lib/orchestrator/store.ts`'s `RunStore` interface
+  before relying on this for more than one person at a time in production.
+  Also worth knowing: Next.js bundles each Route Handler separately — `/api/run`,
+  `/api/run/:id/events`, and `/api/run/:id/resume` do **not** share any
+  in-process module state (confirmed even under `next dev`, not just across
+  Vercel invocations) — so anything that matters must go through the store,
+  never an in-memory singleton/cache. An earlier draft of this feature learned
+  that the hard way (see the regression test in `store.test.ts`).
+- A true background worker: right now, resumed/long-running work still rides
+  inside one function invocation's `after()` window (bounded by
+  `maxDuration`). A run genuinely longer than that still needs a queue/worker
+  (Vercel Queues, Inngest, QStash) picking up where `resume` leaves off,
+  rather than a human re-POSTing `/resume`.
 - Live web research tool (currently `llm_research` uses model knowledge only).
 - Segment-level XBRL parsing (dimensional facts).
 - Export to .docx / .pptx.

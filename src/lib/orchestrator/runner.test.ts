@@ -29,7 +29,7 @@ vi.mock("./learning", () => ({
 
 import { EdgarError } from "@/lib/edgar";
 import { runOrchestration } from "./runner";
-import type { RunEvent } from "./types";
+import type { Artifact, RunEvent } from "./types";
 
 async function collect(gen: AsyncGenerator<RunEvent>): Promise<RunEvent[]> {
   const out: RunEvent[] = [];
@@ -299,5 +299,57 @@ describe("runOrchestration", () => {
       ),
     );
     expect(events.filter((e) => e.type === "budget_update").length).toBeGreaterThan(1);
+  });
+
+  it("reuses the given runId instead of minting a new one", async () => {
+    const events = await collect(
+      runOrchestration({ clientName: "C", proposalType: "digital_transformation" }, "sk-test", {
+        runId: "fixed-run-id",
+      }),
+    );
+    const started = events.find((e) => e.type === "run_started") as Extract<RunEvent, { type: "run_started" }>;
+    expect(started.runId).toBe("fixed-run-id");
+  });
+
+  it("resumes from cached artifacts, skipping already-completed steps and their cost", async () => {
+    const cached: Artifact = {
+      stepId: "market_context",
+      title: "Market context",
+      kind: "research_note",
+      markdown: "cached market context from a prior attempt",
+      model: "claude-sonnet-5",
+      costUsd: 0.01,
+    };
+    const events = await collect(
+      runOrchestration(
+        { clientName: "Acli", targets: [{ name: "Target Co", ticker: "TGT" }], proposalType: "ma_target_screen" },
+        "sk-test",
+        { resumeArtifacts: new Map([["market_context", cached]]) },
+      ),
+    );
+
+    expect(callClaude).not.toHaveBeenCalledWith(expect.objectContaining({ stepId: "market_context" }));
+
+    const completed = events.find((e) => e.type === "run_completed") as Extract<RunEvent, { type: "run_completed" }>;
+    expect(completed.halted).toBe(false);
+    const marketContext = completed.artifacts.find((a) => a.stepId === "market_context")!;
+    expect(marketContext.markdown).toBe("cached market context from a prior attempt");
+
+    const stepCompleted = events.find(
+      (e) => e.type === "step_completed" && e.stepId === "market_context",
+    ) as Extract<RunEvent, { type: "step_completed" }>;
+    expect(stepCompleted.artifact).toBe(cached);
+  });
+
+  it("seeds the budget with prior spend so a resumed run's ceiling accounts for it", async () => {
+    process.env.MAX_RUN_USD = "0.02";
+    const events = await collect(
+      runOrchestration({ clientName: "C", proposalType: "digital_transformation" }, "sk-test", {
+        resumeSpent: [{ step: "prior_step", model: "claude-sonnet-5", inputTokens: 1000, outputTokens: 500, usd: 0.02 }],
+      }),
+    );
+    const completed = events.find((e) => e.type === "run_completed") as Extract<RunEvent, { type: "run_completed" }>;
+    expect(completed.halted).toBe(true);
+    expect(completed.spentUsd).toBeGreaterThanOrEqual(0.02);
   });
 });
