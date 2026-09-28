@@ -471,7 +471,12 @@ export default function App() {
             <input id="apiKey" type="password" value={apiKey} onChange={(e) => persistKey(e.target.value.trim())} placeholder="sk-ant-..." />
             <p className="hint">
               Held in this browser tab&apos;s <code>sessionStorage</code> only. Sent to the backend per
-              run, never logged or persisted server-side.
+              run, never logged or persisted server-side. Don&apos;t have one?{" "}
+              <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">
+                Get an API key
+              </a>{" "}
+              — a run typically costs a few cents to ~$0.50 (see the live meter below; hard-capped
+              at ${ceiling.toFixed(2)} per run so it can&apos;t run away).
             </p>
           </details>
         </div>
