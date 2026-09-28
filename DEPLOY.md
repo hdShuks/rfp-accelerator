@@ -16,32 +16,38 @@ Two surfaces, kept on **separate branches** so they don't fight over the repo:
    |---|---|---|
    | `EDGAR_USER_AGENT` | `RFP Accelerator you@example.com` | **required** — SEC blocks requests without it |
    | `MAX_RUN_USD` | `0.50` | per-run cost ceiling |
-   | `ANTHROPIC_API_KEY` | your console.anthropic.com API key | **set this** — see below |
+   | `ANTHROPIC_API_KEY` | *(leave unset — see below)* | **never set this here** |
    | `ALLOWED_ORIGIN` | your Lovable URL | optional — locks down CORS; defaults to `*` |
 4. Deploy. Every push to `main` redeploys.
 
-### How Claude access adapts per environment (no code change needed — same `main` everywhere)
+### `ANTHROPIC_API_KEY` policy: **never set it on this deployment**
+
+This link goes out to anyone evaluating the project — recruiters, other
+engineers, strangers off a portfolio link — not a handful of trusted people.
+Every visitor pastes their **own** Anthropic API key and spends against
+**their own** budget, capped per run by `MAX_RUN_USD`; the live spend meter
+in the UI shows it as it happens. The project owner's key must never be
+reachable from this deployment, at any traffic level — there is deliberately
+no fallback that lets a visitor spend the owner's money.
 
 `src/lib/llm/anthropic.ts`'s dispatch, in priority order: a user-pasted key
 (header) → `ANTHROPIC_API_KEY` → the local `claude` CLI on a subscription
-(`src/lib/llm/subscription.ts`, gated off whenever `process.env.VERCEL` is
-set — automatic on any Vercel deployment, so it's never even attempted
-there). Concretely:
+(gated off whenever `process.env.VERCEL` is set — automatic on any Vercel
+deployment, so it's never even attempted there). Concretely:
 - **Local dev** (`npm run dev`, no `VERCEL` env var): leave `ANTHROPIC_API_KEY`
-  unset in `.env.local` and it falls through to the `claude` CLI on your
-  Pro/Max subscription — no API credits spent.
-- **Vercel** (`main`'s API): set `ANTHROPIC_API_KEY` in Project Settings as
-  above. Subscription mode is impossible here regardless (no `claude` CLI,
-  and `VERCEL` disables it anyway), so this key is what lets a visitor run
-  the tool without pasting their own. **Trade-off**: anyone who reaches the
-  deployment can spend against this key, bounded only by `MAX_RUN_USD` per
-  run — that's the acceptable exposure for a private/unlisted demo link, not
-  a public one. Leave it unset instead if you'd rather every visitor pastes
-  their own key (strict BYO-key, zero exposure on your key).
+  unset in `.env.local` (as it already is) and it falls through to the
+  `claude` CLI on your own Pro/Max subscription — no API credits spent, and
+  nothing a site visitor can ever reach (this only runs on your own machine).
+- **Vercel** (`main`'s public API): `ANTHROPIC_API_KEY` stays unset,
+  permanently. With it unset and subscription mode impossible on Vercel
+  anyway, `assertLlmReachable()` in `src/lib/llm/anthropic.ts` has no
+  fallback left — a request with no pasted key gets a clear 401
+  (`MissingApiKeyError`) instead of silently succeeding against your key.
+  That's the point: there is no way to misconfigure this into "the owner
+  pays," short of explicitly typing a key into this env var.
 - **Lovable-hosted frontend**: it has no backend of its own — it only calls
-  whichever `main` deployment `VITE_API_BASE` points at, so it automatically
-  inherits that deployment's mode (the `ANTHROPIC_API_KEY` behavior above,
-  if pointed at your Vercel deployment).
+  whichever `main` deployment `VITE_API_BASE` points at, so it inherits the
+  same strict BYO-key requirement automatically.
 
 Other notes:
 - `/api/run` returns a `run_id` immediately and executes in the background

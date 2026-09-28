@@ -515,7 +515,12 @@ export default function Home() {
             <p className="hint">
               Held in this browser tab&apos;s <code>sessionStorage</code> only (cleared when the tab
               closes). Sent to this app&apos;s backend per run to call Claude on your account, and
-              never logged or persisted server-side.
+              never logged or persisted server-side. Don&apos;t have one?{" "}
+              <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">
+                Get an API key
+              </a>{" "}
+              — a run typically costs a few cents to ~$0.50 (see the live meter below; hard-capped
+              at ${ceiling.toFixed(2)} per run so it can&apos;t run away).
             </p>
           </details>
         </div>
