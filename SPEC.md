@@ -18,26 +18,84 @@ financial data from **SEC EDGAR**, and synthesizes the artifacts into a draft.
 ## 1. Core loop
 
 ```
-Input: { clientName, clientTicker?, targetTicker?, proposalType?, description }
+Input: { clientName, clientTicker?, clientType?, targets?: Company[], proposalType?,
+         description?, stepInstructions?, forceSteps?, skipSteps? }
    │
    ▼
 Classifier ── if proposalType missing, Claude (Haiku) reads description,
               proposes { type, confidence, rationale }; user confirms/overrides
    │
    ▼
-Playbook lookup ── proposalType → ordered step list (YAML, data not code)
+Playbook lookup ── proposalType → default ordered step list (YAML, data not code)
+   │
+   ▼
+Planner ── cheap Haiku pass (skipped when there's nothing to reconsider) that can
+           splice in catalog steps (precedent transactions, competitor landscape)
+           based on the brief, explicit stepInstructions, hard force/skip
+           overrides, and a Markdown learning log of past runs. Always falls
+           back to the unmodified default plan on any failure.
    │
    ▼
 Step runner ── for each step: gather inputs → run tool → emit typed Artifact
-               (respects depends_on; halts on budget ceiling)
+               (respects depends_on incl. auto-wired new steps; for_each: targets
+               fans a step out across every target/comparable; halts on budget
+               ceiling; a missing/unresolvable ticker falls back to an
+               AI-generated company profile instead of failing)
    │
    ▼
 Synthesizer ── assembles Artifacts into a proposal skeleton (Markdown)
+   │
+   ▼
+Learning log ── appends what was planned vs. the default, and why, for next time
 ```
 
 Each run streams progress to the client over SSE. The whole orchestration
 executes inside one streaming HTTP response (fits Vercel Fluid's 300s ceiling for
-the MVP; see §7 for the resumable design we'd move to if runs get longer).
+the MVP; see §7 for the resumable design we'd move to if runs get longer — a
+multi-target M&A run with an added catalog step and effort-high synthesis has
+been observed to approach that ceiling end-to-end, so this isn't theoretical).
+
+### Companies, not just tickers
+
+`clientTicker` / a single `targetTicker` was the MVP shape. The real input is:
+a client (`clientName`, optional `clientTicker`, `clientType`: `corporate` |
+`pe_sponsor`, optional `clientNotes` + `clientDocuments`) and zero or more
+`targets` — acquisition targets, PE portfolio/roll-up candidates, or
+market-entry comparables — each `{ name, ticker?, notes?, documents? }`.
+
+Any company without a ticker, or whose ticker EDGAR can't resolve, doesn't fail
+the run: `edgar_financials` returns an honest "no filing data" placeholder
+(never invents figures) and `edgar_narrative` falls back to a Claude-written
+profile from general knowledge plus any attached notes/documents — always
+labelled as unverified, never presented as sourced from a filing. See
+`src/lib/orchestrator/company.ts`.
+
+### Orchestration planning
+
+A playbook's steps are the *default* plan, not the only plan. Between classify
+and execute, `src/lib/orchestrator/planner.ts` runs a cheap Haiku call that can:
+- add steps from a shared catalog (`src/lib/orchestrator/catalog.ts` —
+  currently `precedent_transactions` and `competitor_landscape`) when the brief
+  or the user's `stepInstructions` calls for it,
+- honor hard `forceSteps` / `skipSteps` overrides (never removes the final
+  deliverable step),
+- and read a short excerpt of `src/lib/orchestrator/learning.ts`'s append-only
+  Markdown log of past runs for this playbook type, so a repeated, explicit
+  preference gets picked up without the user re-typing it every time.
+
+The call is skipped entirely (saving the tokens) when there's no
+`stepInstructions`, no force/skip overrides, and nothing relevant in the
+learning log — most runs just use the default plan. Any parse failure, thrown
+error, or invalid resulting step graph falls back to the unmodified default
+plan; planning must never block a run. New steps are independent research
+(`depends_on: []`) and get auto-wired as a dependency of every default
+synthesis step, so no manual YAML edits are needed to make them count.
+
+The learning log is a plain-text file, not a real memory system — no
+embeddings, no dedupe. Disk locally (`data/orchestration-learning.md`,
+gitignored); on serverless it's per-instance and does not persist across
+deploys or cold starts. Treat it as a nice local-dev signal, and put a real
+store (KV/Postgres) behind it before relying on it in production.
 
 ---
 
@@ -82,10 +140,15 @@ steps:
 
 | tool | deterministic? | description |
 |---|---|---|
-| `edgar_financials` | yes | ticker → CIK → companyfacts → ~20-line compact table + computed ratios/CAGRs |
-| `edgar_narrative` | yes | latest 10-K → Item 1 (Business), 1A (Risk Factors), 7 (MD&A) text |
+| `edgar_financials` | yes* | ticker → CIK → companyfacts → ~20-line compact table + computed ratios/CAGRs. No/unresolvable ticker → deterministic "no filing data" placeholder, never invented figures. |
+| `edgar_narrative` | yes* | latest 10-K → Item 1 (Business), 1A (Risk Factors), 7 (MD&A) text. No/unresolvable ticker → Claude-written profile (general knowledge + any notes/documents), clearly labelled. |
 | `llm_research` | no | Claude answers a research prompt from general knowledge |
 | `llm_synthesis` | no | Claude combines named upstream artifacts into a new artifact |
+
+A step may also set `for_each: targets` — instead of running once against the
+client, it runs once per entry in `RunInput.targets`, each producing its own
+artifact (`stepId::0`, `stepId::1`, ...). A downstream step that `depends_on` a
+`for_each` step receives every one of those artifacts.
 
 ### Model tiers (`src/lib/llm/anthropic.ts`)
 
@@ -154,8 +217,11 @@ Resolved per request, in priority order:
    set or `RFP_LLM_MODE=api`; unavailable when no `claude` binary is found.
 
 All model calls go through the backend (never browser → Anthropic) so budget caps
-are enforced server-side. In subscription mode the CLI reports $0 spend, so the
-budget falls back to an API-rate estimate from the token counts.
+are enforced server-side. In subscription mode the CLI reports its own
+API-rate-equivalent cost estimate (confirmed against real runs — not billed to
+an API balance, but a real dollar figure), which the budget uses directly;
+if that ever comes back as 0 or missing, the budget falls back to computing the
+same estimate itself from the token counts.
 
 ---
 
@@ -165,9 +231,16 @@ budget falls back to an API-rate estimate from the token counts.
 |---|---|---|
 | `/api/classify` | POST | `{ description }` → `{ type, confidence, rationale }` |
 | `/api/playbooks` | GET | list of `{ id, name, description, inputs }` |
-| `/api/run` | POST | `{ input }` → **SSE stream** of `RunEvent`s |
+| `/api/health` | GET | `{ llm: { apiKeyFromEnv, localSubscription, needsUserKey } }` |
+| `/api/run` | POST | `RunInput` → **SSE stream** of `RunEvent`s |
 
-`RunEvent` = `run_started | step_started | step_progress | step_completed | step_failed | budget_update | run_completed | run_failed`.
+`RunEvent` = `run_started | plan_ready | step_started | step_progress | step_completed | step_failed | budget_update | run_completed | run_failed`.
+
+`/api/run`'s body is sanitized by `src/lib/orchestrator/sanitize.ts` before
+anything else touches it — caps target count (8), documents per company (5),
+document size (40k chars), and note/instruction lengths, and drops anything
+malformed rather than erroring. Never trust the request body past that
+function.
 
 ---
 
@@ -189,7 +262,18 @@ Commit after each slice.
 
 - Resumable runs: `POST /api/run` returns `run_id` immediately, steps persisted to
   a store (KV/Postgres), `GET /api/run/:id/events` replays + tails via SSE, each
-  step independently retryable. Needed if runs exceed the function ceiling.
+  step independently retryable. Needed if runs exceed the function ceiling —
+  and a multi-target run with an added catalog step has already been observed
+  to approach 300s end-to-end, so this is the most load-bearing item here now.
 - Live web research tool (currently `llm_research` uses model knowledge only).
 - Segment-level XBRL parsing (dimensional facts).
 - Export to .docx / .pptx.
+- More catalog steps / playbooks for other MBB archetypes the engine already
+  supports structurally (PMI, cost transformation, turnaround) — adding one is
+  a YAML file plus, if it needs a new research angle, a catalog entry.
+- File uploads are plain text/Markdown only; no PDF/docx extraction yet — the
+  UI asks users to paste content into a `.txt` file in the meantime.
+- `forceSteps` / `skipSteps` are real in the API and planner but have no UI
+  control yet — only the free-text `stepInstructions` field is wired up.
+- A real memory store behind the learning log (see §1) once this needs to
+  survive serverless cold starts / multiple instances.

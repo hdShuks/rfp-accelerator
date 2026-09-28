@@ -1,6 +1,6 @@
 import { assertLlmReachable, MissingApiKeyError } from "@/lib/llm/anthropic";
 import { runOrchestration } from "@/lib/orchestrator/runner";
-import type { RunInput } from "@/lib/orchestrator/types";
+import { sanitizeRunInput } from "@/lib/orchestrator/sanitize";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,14 +8,15 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 export async function POST(req: Request) {
-  let body: Partial<RunInput>;
+  let rawBody: unknown;
   try {
-    body = await req.json();
+    rawBody = await req.json();
   } catch {
     return json({ error: "Invalid JSON body" }, 400);
   }
 
-  if (!body.clientName?.trim()) {
+  const input = sanitizeRunInput(rawBody);
+  if (!input) {
     return json({ error: "clientName is required" }, 400);
   }
 
@@ -26,14 +27,6 @@ export async function POST(req: Request) {
     const status = err instanceof MissingApiKeyError ? 401 : 500;
     return json({ error: err instanceof Error ? err.message : "Auth failed" }, status);
   }
-
-  const input: RunInput = {
-    clientName: body.clientName.trim(),
-    clientTicker: body.clientTicker?.trim() || undefined,
-    targetTicker: body.targetTicker?.trim() || undefined,
-    proposalType: body.proposalType?.trim() || undefined,
-    description: body.description?.trim() || undefined,
-  };
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({

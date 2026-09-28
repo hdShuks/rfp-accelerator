@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { getFinancialSummary, getNarrative, EdgarError } from "@/lib/edgar";
 import { callClaude, type ModelTier } from "@/lib/llm/anthropic";
 import { RunBudget, BudgetExceededError } from "@/lib/llm/budget";
 import { getPlaybook } from "@/lib/playbooks/loader";
 import { topoOrder, type Playbook, type Step } from "@/lib/playbooks/schema";
 import { classify } from "./classifier";
-import { financialSummaryToMarkdown, narrativeToMarkdown } from "./format";
+import { financialsArtifact, narrativeOrProfileArtifact } from "./company";
+import { appendLearningRecord } from "./learning";
+import { planSteps } from "./planner";
 import { buildResearchPrompt, buildSynthesisPrompt, SYSTEM_PROMPT } from "./prompts";
-import type { Artifact, RunEvent, RunInput } from "./types";
+import type { Artifact, CompanyRef, RunEvent, RunInput } from "./types";
 
 const DEFAULT_TIER: Record<Step["tool"], ModelTier> = {
   edgar_financials: "fast",
@@ -20,10 +21,18 @@ function ceilingUsd(): number {
   return Number(process.env.MAX_RUN_USD) || 0.5;
 }
 
-function pickTicker(step: Step, input: RunInput): { field: string; value: string | undefined } {
-  const field = step.inputs?.ticker ?? "clientTicker";
-  const value = (input as unknown as Record<string, unknown>)[field] as string | undefined;
-  return { field, value: value?.trim() || undefined };
+function clientRef(input: RunInput): CompanyRef {
+  return {
+    name: input.clientName,
+    ticker: input.clientTicker?.trim() || undefined,
+    notes: input.clientNotes,
+    documents: input.clientDocuments,
+  };
+}
+
+/** id used for one iteration of a for_each step's artifact/event stream */
+function subId(stepId: string, index: number): string {
+  return `${stepId}::${index}`;
 }
 
 /**
@@ -38,15 +47,18 @@ export async function* runOrchestration(
   const runId = randomUUID();
   const budget = new RunBudget(ceilingUsd());
 
-  let playbook: Playbook;
+  let basePlaybook: Playbook;
   let classification;
   try {
     classification = await classify(input, apiKey, budget);
-    playbook = await getPlaybook(classification.type);
+    basePlaybook = await getPlaybook(classification.type);
   } catch (err) {
     yield { type: "run_failed", runId, error: errMsg(err) };
     return;
   }
+
+  const { steps: plannedSteps, summary: plan } = await planSteps(basePlaybook, input, apiKey, budget);
+  const playbook: Playbook = { ...basePlaybook, steps: plannedSteps };
 
   const order = topoOrder(playbook);
   const stepById = new Map(playbook.steps.map((s) => [s.id, s]));
@@ -58,27 +70,80 @@ export async function* runOrchestration(
     playbookId: playbook.id,
     playbookName: playbook.name,
     classification,
-    steps: order.map((id) => ({ id, title: stepById.get(id)!.title ?? id })),
+    // for_each steps aren't pre-listed — their rows appear as they start,
+    // one per target, since we don't know a stable count until here.
+    steps: order
+      .filter((id) => !stepById.get(id)!.for_each)
+      .map((id) => ({ id, title: stepById.get(id)!.title ?? id })),
   };
+  yield { type: "plan_ready", plan };
   yield budgetEvent(budget);
 
   let halted = false;
   let haltReason: string | undefined;
 
-  for (const stepId of order) {
+  const resolveDeps = (step: Step): Artifact[] => {
+    const deps: Artifact[] = [];
+    for (const depId of step.depends_on) {
+      if (stepById.get(depId)?.for_each) {
+        for (const [key, artifact] of artifacts) {
+          if (key.startsWith(`${depId}::`)) deps.push(artifact);
+        }
+      } else {
+        const a = artifacts.get(depId);
+        if (a) deps.push(a);
+      }
+    }
+    return deps;
+  };
+
+  outer: for (const stepId of order) {
     const step = stepById.get(stepId)!;
     const title = step.title ?? step.id;
-    yield { type: "step_started", stepId, title, tool: step.tool };
-
-    // If a dependency failed to produce an artifact, skip synthesis steps.
-    const deps = step.depends_on.map((d) => artifacts.get(d)).filter(Boolean) as Artifact[];
+    const deps = resolveDeps(step);
     if (step.depends_on.length && deps.length === 0) {
       yield { type: "step_failed", stepId, error: "All upstream steps failed; nothing to synthesise." };
       continue;
     }
 
+    if (step.for_each === "targets") {
+      const targets = input.targets ?? [];
+      if (targets.length === 0) {
+        yield { type: "step_failed", stepId, error: `"${title}" needs at least one target, but none were provided.` };
+        continue;
+      }
+      for (let i = 0; i < targets.length; i++) {
+        const id = subId(stepId, i);
+        const itemTitle = `${title} — ${targets[i].name}`;
+        yield { type: "step_started", stepId: id, title: itemTitle, tool: step.tool };
+        try {
+          const artifact = yield* runStep(step, input, playbook, deps, apiKey, budget, {
+            target: targets[i],
+            id,
+            title: itemTitle,
+          });
+          artifacts.set(id, artifact);
+          yield { type: "step_completed", stepId: id, artifact };
+          yield budgetEvent(budget);
+        } catch (err) {
+          if (err instanceof BudgetExceededError) {
+            halted = true;
+            haltReason = err.message;
+            yield { type: "step_failed", stepId: id, error: err.message };
+            break outer;
+          }
+          yield { type: "step_failed", stepId: id, error: errMsg(err) };
+        }
+      }
+      continue;
+    }
+
+    yield { type: "step_started", stepId, title, tool: step.tool };
     try {
-      const artifact = yield* runStep(step, input, playbook, deps, apiKey, budget);
+      const artifact = yield* runStep(step, input, playbook, deps, apiKey, budget, {
+        id: stepId,
+        title,
+      });
       artifacts.set(stepId, artifact);
       yield { type: "step_completed", stepId, artifact };
       yield budgetEvent(budget);
@@ -87,14 +152,28 @@ export async function* runOrchestration(
         halted = true;
         haltReason = err.message;
         yield { type: "step_failed", stepId, error: err.message };
-        break;
+        break outer;
       }
       yield { type: "step_failed", stepId, error: errMsg(err) };
     }
   }
 
-  const ordered = order.map((id) => artifacts.get(id)).filter(Boolean) as Artifact[];
-  const proposal = ordered.find((a) => a.kind === "proposal_skeleton") ?? null;
+  const ordered = [...artifacts.values()];
+  // the deliverable is whatever the plan's final step produced, not a literal id match —
+  // planSteps() guarantees the playbook's last default step stays last regardless of what
+  // the planner spliced in ahead of it.
+  const proposal = artifacts.get(order.at(-1) ?? "") ?? null;
+
+  await appendLearningRecord({
+    playbookId: basePlaybook.id,
+    clientName: input.clientName,
+    clientType: input.clientType,
+    targets: (input.targets ?? []).map((t) => t.name),
+    defaultSteps: topoOrder(basePlaybook),
+    plannedSteps: order,
+    stepInstructions: input.stepInstructions,
+    rationale: plan.rationale,
+  });
 
   yield {
     type: "run_completed",
@@ -107,6 +186,12 @@ export async function* runOrchestration(
   };
 }
 
+interface StepIdentity {
+  id: string; // the concrete id to stamp on the returned artifact (may be "step::i")
+  title: string;
+  target?: CompanyRef; // present only for a for_each iteration
+}
+
 async function* runStep(
   step: Step,
   input: RunInput,
@@ -114,51 +199,43 @@ async function* runStep(
   deps: Artifact[],
   apiKey: string | null | undefined,
   budget: RunBudget,
+  identity: StepIdentity,
 ): AsyncGenerator<RunEvent, Artifact, void> {
+  const { id, title, target } = identity;
+  const ref = target ?? clientRef(input);
   const tier: ModelTier = step.model_tier ?? DEFAULT_TIER[step.tool];
-  const title = step.title ?? step.id;
 
   switch (step.tool) {
     case "edgar_financials": {
-      const { field, value } = pickTicker(step, input);
-      if (!value) throw new EdgarError(`Step "${step.id}" needs input "${field}", which was not provided.`);
-      yield { type: "step_progress", stepId: step.id, message: `Fetching EDGAR companyfacts for ${value}…` };
-      const summary = await getFinancialSummary(value);
-      return {
-        stepId: step.id,
-        title,
-        kind: "financial_summary",
-        data: summary,
-        markdown: financialSummaryToMarkdown(summary),
-      };
+      yield { type: "step_progress", stepId: id, message: `Gathering financials for ${ref.name}…` };
+      const artifact = await financialsArtifact(ref, title);
+      return { ...artifact, stepId: id };
     }
 
     case "edgar_narrative": {
-      const { field, value } = pickTicker(step, input);
-      if (!value) throw new EdgarError(`Step "${step.id}" needs input "${field}", which was not provided.`);
-      yield { type: "step_progress", stepId: step.id, message: `Fetching latest 10-K for ${value}…` };
-      const narrative = await getNarrative(value);
-      return {
-        stepId: step.id,
+      yield { type: "step_progress", stepId: id, message: `Gathering business profile for ${ref.name}…` };
+      const artifact = await narrativeOrProfileArtifact(
+        ref,
         title,
-        kind: "narrative_extract",
-        data: narrative,
-        markdown: narrativeToMarkdown(narrative),
-      };
+        apiKey,
+        budget,
+        id,
+      );
+      return { ...artifact, stepId: id };
     }
 
     case "llm_research": {
-      yield { type: "step_progress", stepId: step.id, message: `Researching (${tier})…` };
+      yield { type: "step_progress", stepId: id, message: `Researching (${tier})…` };
       const res = await callClaude({
         apiKey,
         tier,
         system: SYSTEM_PROMPT,
         prompt: buildResearchPrompt(step, input),
         budget,
-        stepId: step.id,
+        stepId: id,
       });
       return {
-        stepId: step.id,
+        stepId: id,
         title,
         kind: "research_note",
         markdown: res.text,
@@ -168,7 +245,7 @@ async function* runStep(
     }
 
     case "llm_synthesis": {
-      yield { type: "step_progress", stepId: step.id, message: `Synthesising ${deps.length} artifact(s) (${tier})…` };
+      yield { type: "step_progress", stepId: id, message: `Synthesising ${deps.length} artifact(s) (${tier})…` };
       const res = await callClaude({
         apiKey,
         tier,
@@ -176,10 +253,10 @@ async function* runStep(
         prompt: buildSynthesisPrompt(step, input, playbook, deps),
         effort: step.id === "proposal_skeleton" ? "high" : "medium",
         budget,
-        stepId: step.id,
+        stepId: id,
       });
       return {
-        stepId: step.id,
+        stepId: id,
         title,
         kind: step.id === "proposal_skeleton" ? "proposal_skeleton" : "synthesis_note",
         markdown: res.text,

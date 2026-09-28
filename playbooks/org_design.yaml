@@ -22,12 +22,10 @@ steps:
   - id: client_financials
     title: Client financial profile (EDGAR)
     tool: edgar_financials
-    inputs: { ticker: clientTicker }
 
   - id: client_structure_signals
     title: Segments, headcount & risk signals (10-K)
     tool: edgar_narrative
-    inputs: { ticker: clientTicker }
 
   - id: design_hypotheses
     title: Design hypotheses

@@ -24,6 +24,7 @@ next-env.d.ts
 # local caches
 .cache/
 .edgar-cache/
+data/orchestration-learning.md
 
 # misc
 .DS_Store

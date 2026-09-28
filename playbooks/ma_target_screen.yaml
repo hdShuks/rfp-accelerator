@@ -1,13 +1,13 @@
 id: ma_target_screen
 name: M&A / Acquisition Screen
 description: >
-  Screen a public acquisition target for a corporate or PE client — market
-  context, target financials and operations from SEC filings, and a first cut at
-  synergy hypotheses.
-aliases: [m&a, ma, mna, merger, acquisition, "potential acquisition", buyside]
+  Screen one or more public or private acquisition targets for a corporate or PE
+  client — market context, target financials and operations (EDGAR where
+  available, an AI-generated profile otherwise), and synergy hypotheses.
+aliases: [m&a, ma, mna, merger, acquisition, "potential acquisition", buyside, "roll-up", "platform acquisition"]
 inputs:
-  required: [clientName, targetTicker]
-  optional: [clientTicker, description]
+  required: [clientName]
+  optional: [clientTicker, description, targets]
 
 steps:
   - id: market_context
@@ -16,29 +16,37 @@ steps:
     model_tier: reasoning
     prompt: market_context
 
+  - id: precedent_transactions
+    title: Precedent transactions
+    tool: llm_research
+    model_tier: reasoning
+    prompt: precedent_transactions
+
   - id: target_financials
-    title: Target financial profile (EDGAR)
+    title: Target financial profile
     tool: edgar_financials
-    inputs: { ticker: targetTicker }
+    for_each: targets
 
   - id: target_operations
-    title: Target business & risk overview (10-K)
+    title: Target business & risk overview
     tool: edgar_narrative
-    inputs: { ticker: targetTicker }
+    for_each: targets
 
   - id: synergy_hypotheses
     title: Synergy hypotheses
     tool: llm_synthesis
     model_tier: reasoning
-    depends_on: [market_context, target_financials, target_operations]
+    depends_on: [market_context, precedent_transactions, target_financials, target_operations]
     instruction: >
       Propose 4-6 concrete synergy hypotheses (cost and revenue), each with a
       rough directional size, the evidence it rests on, and how the deal team
-      would test it in diligence. Separate what the data supports from what is
-      speculative.
+      would test it in diligence. Weigh the precedent transactions for what they
+      imply about achievable synergies and pricing. If there are multiple
+      targets, address each one's synergy case separately before any roll-up
+      view. Separate what the data supports from what is speculative.
 
   - id: proposal_skeleton
     title: Draft proposal skeleton
     tool: llm_synthesis
     model_tier: reasoning
-    depends_on: [market_context, target_financials, target_operations, synergy_hypotheses]
+    depends_on: [market_context, precedent_transactions, target_financials, target_operations, synergy_hypotheses]

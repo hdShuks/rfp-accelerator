@@ -1,0 +1,51 @@
+id: market_entry
+name: Market Entry / Expansion Strategy
+description: >
+  Assess entering a new market, segment, or geography — sizing, competitive
+  landscape via named comparable/incumbent companies, and an entry approach.
+aliases: [market entry, expansion, "new market", "geographic expansion", "go-to-market", "international expansion"]
+inputs:
+  required: [clientName]
+  optional: [clientTicker, description, targets]
+
+steps:
+  - id: market_landscape
+    title: Market sizing & structure
+    tool: llm_research
+    model_tier: reasoning
+    prompt: market_context
+    instruction: >
+      Focus on the size and growth of the specific market/geography being
+      entered, regulatory or entry barriers, and how it's currently structured
+      — not the client's home market.
+
+  - id: client_financials
+    title: Client financial profile (EDGAR)
+    tool: edgar_financials
+
+  - id: comparable_financials
+    title: Comparable / incumbent financials
+    tool: edgar_financials
+    for_each: targets
+
+  - id: comparable_profiles
+    title: Comparable / incumbent profiles
+    tool: edgar_narrative
+    for_each: targets
+
+  - id: entry_hypotheses
+    title: Entry approach hypotheses
+    tool: llm_synthesis
+    model_tier: reasoning
+    depends_on: [market_landscape, client_financials, comparable_financials, comparable_profiles]
+    instruction: >
+      Propose 3-5 entry approaches (organic build, partnership/JV, or
+      acquisition) with pros/cons anchored to the comparable set researched and
+      the client's own balance-sheet capacity. Note which approach each named
+      comparable would suggest is most viable.
+
+  - id: proposal_skeleton
+    title: Draft proposal skeleton
+    tool: llm_synthesis
+    model_tier: reasoning
+    depends_on: [market_landscape, client_financials, comparable_financials, comparable_profiles, entry_hypotheses]

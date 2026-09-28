@@ -21,12 +21,10 @@ steps:
   - id: client_financials
     title: Client financial profile (EDGAR)
     tool: edgar_financials
-    inputs: { ticker: clientTicker }
 
   - id: client_strategy_signals
     title: Client strategy & risk signals (10-K)
     tool: edgar_narrative
-    inputs: { ticker: clientTicker }
 
   - id: value_at_stake
     title: Value-at-stake hypotheses

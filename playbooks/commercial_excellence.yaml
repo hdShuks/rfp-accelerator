@@ -22,12 +22,10 @@ steps:
   - id: client_financials
     title: Client financial profile (EDGAR)
     tool: edgar_financials
-    inputs: { ticker: clientTicker }
 
   - id: client_commercial_signals
     title: Revenue mix & commentary (10-K)
     tool: edgar_narrative
-    inputs: { ticker: clientTicker }
 
   - id: growth_hypotheses
     title: Commercial value hypotheses

@@ -14,8 +14,14 @@ export const stepSchema = z.object({
   title: z.string().optional(),
   tool: z.enum(STEP_TOOLS),
   model_tier: z.enum(["fast", "reasoning", "deep"]).optional(),
-  /** map of param name -> input field name, e.g. { ticker: targetTicker } */
-  inputs: z.record(z.string()).optional(),
+  /**
+   * Run this step once per entry in `RunInput.targets` instead of once for the
+   * client. Only meaningful for edgar_financials / edgar_narrative — a target
+   * with no ticker (or one EDGAR can't resolve) falls back to a Claude-written
+   * company profile rather than failing. Downstream steps that depend_on a
+   * for_each step receive every expanded artifact.
+   */
+  for_each: z.enum(["targets"]).optional(),
   depends_on: z.array(z.string()).optional().default([]),
   /** prompt template key under src/lib/prompts/ (llm steps) */
   prompt: z.string().optional(),

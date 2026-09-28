@@ -65,16 +65,40 @@ CI (typecheck + test + build) runs on push/PR via
 
 ## Playbooks
 
-One YAML file per proposal type in [`playbooks/`](./playbooks). Adding a type is a
-new file — the runner is data-driven. Each playbook is an ordered list of steps;
-each step is one of four tools:
+One YAML file per proposal type in [`playbooks/`](./playbooks): `ma_target_screen`,
+`digital_transformation`, `org_design`, `commercial_excellence`, `market_entry`.
+Adding a type is a new file — the runner is data-driven. Each playbook is an
+ordered list of steps; each step is one of four tools:
 
 | tool | deterministic | does |
 |---|---|---|
-| `edgar_financials` | yes | ticker → CIK → companyfacts → compact `FinancialSummary` (ratios/CAGRs computed in code) |
-| `edgar_narrative` | yes | latest 10-K → Item 1 / 1A / 7 text (best-effort HTML parse) |
+| `edgar_financials` | yes | ticker → CIK → companyfacts → compact `FinancialSummary` (ratios/CAGRs computed in code); no/unresolvable ticker → honest "no filing data" placeholder |
+| `edgar_narrative` | yes | latest 10-K → Item 1 / 1A / 7 text (best-effort HTML parse); no/unresolvable ticker → Claude-written company profile, clearly labelled |
 | `llm_research` | no | Claude answers a research prompt from general knowledge |
 | `llm_synthesis` | no | Claude combines named upstream artifacts |
+
+A step can also be `for_each: targets` to run once per company in `targets`
+(acquisition targets, PE portfolio companies, market-entry comparables — 0, 1,
+or many) instead of once for the client.
+
+### Orchestration planning
+
+The playbook's step list is a *default*, not the only option. A cheap Haiku
+pass between classification and execution (`src/lib/orchestrator/planner.ts`)
+can splice in steps from a shared catalog — currently `precedent_transactions`
+(comparable M&A deals, on by default for M&A screens) and `competitor_landscape`
+— when the brief calls for it or the user asks via the UI's "orchestration
+notes" field. It reads a short append-only Markdown log of past runs
+(`data/orchestration-learning.md`, local-dev only — see SPEC §1) so a repeated
+preference sticks without re-typing it. Any failure here just falls back to the
+plain default plan.
+
+### Companies without a ticker
+
+Client and targets both accept a name with no ticker, notes, and attached
+`.txt`/`.md` files. No filing data is ever invented; instead the business
+overview step writes an AI-generated profile from general knowledge plus
+whatever you attached, clearly marked as unverified.
 
 ## Cost control
 
@@ -99,4 +123,10 @@ Claude Code owns this repo → GitHub → Vercel. Import at `vercel.com/new`, se
   can't be located the UI flags it and links the source filing.
 - `llm_research` uses model knowledge, not live web search.
 - In-repo `.edgar-cache/` locally; serverless falls back to per-instance memory.
+- File attachments are plain text/Markdown only — no PDF/docx extraction yet.
+- The learning log (`data/orchestration-learning.md`) is local-dev only; it
+  doesn't persist across Vercel deploys/cold starts.
+- A multi-target M&A run with an added catalog step can approach Vercel's 300s
+  function ceiling end-to-end — see SPEC §7 for the resumable-run design.
+- `forceSteps`/`skipSteps` exist in the API but have no UI control yet.
 - One transitive `postcss` advisory via Next 15 (dev tooling only; fixed in Next 16).
